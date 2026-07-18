@@ -1,9 +1,6 @@
-cat > menu.sh << 'EOF'
 #!/bin/bash
-
-BSPROXY="/usr/local/bin/bsproxy"
+BSPROXY="/opt/bsproxy/proxy"
 PID_FILE="/tmp/bsproxy_"
-LOG_FILE="/tmp/bsproxy_"
 
 show_menu() {
     clear
@@ -12,8 +9,6 @@ show_menu() {
     echo "====================================="
     echo "          BSPROXY                    "
     echo ""
-    
-    # Verificar portas abertas
     ACTIVE_PORTS=""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
@@ -25,7 +20,6 @@ show_menu() {
             fi
         fi
     done
-    
     if [ -n "$ACTIVE_PORTS" ]; then
         echo "Porta(s) aberta(s):$ACTIVE_PORTS"
     else
@@ -46,32 +40,27 @@ open_port() {
         sleep 2
         return
     fi
-    
-    # Verificar se já está rodando
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         echo "❌ Porta ${PORT} já está aberta!"
         sleep 2
         return
     fi
-    
     echo "🔓 Abrindo porta ${PORT} com multiprotocolo..."
     echo "   Protocols: SOCKS5 + TLS/SECURITY + TCP Fallback"
     
-    # Verificar se bsproxy existe
     if [ ! -f "$BSPROXY" ]; then
-        echo "❌ bsproxy não encontrado! Execute ./install.sh primeiro"
+        echo "❌ BSProxy não encontrado em $BSPROXY"
         sleep 3
         return
     fi
     
-    # Iniciar o bsproxy com a porta
-    nohup ${BSPROXY} -p ${PORT} > "${LOG_FILE}${PORT}.log" 2>&1 &
+    nohup ${BSPROXY} -p ${PORT} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
-    
     sleep 2
+    
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta com sucesso!"
-        echo "📋 Log: ${LOG_FILE}${PORT}.log"
+        echo "📋 Log: /tmp/bsproxy_${PORT}.log"
         echo ""
         echo "🧪 Teste SOCKS5: curl --socks5 localhost:${PORT} http://example.com"
         echo "🧪 Teste TLS: openssl s_client -connect localhost:${PORT}"
@@ -89,10 +78,8 @@ close_port() {
         sleep 2
         return
     fi
-    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        PID=$(cat "${PID_FILE}${PORT}.pid")
-        kill -9 ${PID} 2>/dev/null
+        kill -9 $(cat "${PID_FILE}${PORT}.pid") 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
         echo "✅ Porta ${PORT} fechada com sucesso!"
     else
@@ -104,20 +91,10 @@ close_port() {
 while true; do
     show_menu
     read OPTION
-    
     case $OPTION in
         1) open_port ;;
         2) close_port ;;
-        3) 
-            echo "👋 Saindo..."
-            exit 0
-            ;;
-        *) 
-            echo "❌ Opção inválida!"
-            sleep 2
-            ;;
+        3) echo "👋 Saindo..."; exit 0 ;;
+        *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
-EOF
-
-chmod +x menu.sh
