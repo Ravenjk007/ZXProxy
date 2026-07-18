@@ -1,6 +1,9 @@
+cat > install.sh << 'EOF'
 #!/bin/bash
 
 echo "🔧 Instalando BSProxy Multiprotocol..."
+echo "📡 Protocols: SOCKS5 + TLS/SECURITY + TCP Fallback"
+echo ""
 
 # Instalar Rust se não tiver
 if ! command -v cargo &> /dev/null; then
@@ -13,7 +16,7 @@ fi
 echo "📦 Compilando BSProxy..."
 cargo build --release
 
-# Copiar para /usr/local/bin (opcional)
+# Copiar para /usr/local/bin
 if [ -f "./target/release/bsproxy" ]; then
     echo "📦 Instalando bsproxy no sistema..."
     sudo cp ./target/release/bsproxy /usr/local/bin/
@@ -22,14 +25,23 @@ if [ -f "./target/release/bsproxy" ]; then
 fi
 
 # Tornar scripts executáveis
-chmod +x menu.sh
+if [ -f "./menu.sh" ]; then
+    chmod +x menu.sh
+fi
 
 echo ""
 echo "✅ Instalação concluída!"
-echo "🚀 Para iniciar: ./menu.sh"
-echo "💡 Ou diretamente: bsproxy -p 80"
 echo ""
-echo "📡 Protocolos suportados:"
-echo "   - SOCKS5 (byte 0x05)"
-echo "   - TLS/SECURITY (byte 0x16)"
-echo "   - TCP Fallback (qualquer outro)"
+echo "🚀 Para usar:"
+echo "   bsproxy -p 80"
+echo ""
+echo "📋 Ou com menu:"
+echo "   ./menu.sh"
+echo ""
+echo "🧪 Testes:"
+echo "   curl --socks5 localhost:80 http://example.com"
+echo "   openssl s_client -connect localhost:80"
+echo ""
+EOF
+
+chmod +x install.sh
