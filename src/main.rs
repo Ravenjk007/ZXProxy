@@ -42,7 +42,7 @@ async fn main() -> Result<()> {
     info!("🚀 BSProxy Multiprotocol listening on {}", addr);
     info!("📡 Protocols: SOCKS5, TLS, WebSocket, TCP");
 
-    while let Ok((mut socket, _)) = listener.accept().await {
+    while let Ok((socket, _)) = listener.accept().await {
         tokio::spawn(async move {
             let mut buf = [0u8; 16];
             match socket.peek(&mut buf).await {
@@ -67,6 +67,9 @@ async fn main() -> Result<()> {
                             }
                         }
                     }
+                }
+                Ok(_) => {
+                    info!("📦 Connection closed");
                 }
                 Err(e) => error!("Peek error: {}", e),
             }
