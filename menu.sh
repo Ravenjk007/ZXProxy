@@ -26,7 +26,7 @@ show_menu() {
         echo "Porta(s): nenhuma"
     fi
     echo ""
-    echo "📡 Protocolos: SOCKS5 | TLS | WebSocket | TCP"
+    echo "📡 SOCKS5 | TLS | WebSocket | TCP"
     echo ""
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
@@ -47,33 +47,23 @@ open_port() {
         sleep 2
         return
     fi
-    echo "🔓 Abrindo porta ${PORT} com multiprotocolo..."
-    echo "   Protocols: SOCKS5 + TLS/SECURITY + WebSocket + TCP Fallback"
-    
+    echo "🔓 Abrindo porta ${PORT}..."
     if [ ! -f "$BSPROXY" ]; then
-        echo "❌ BSProxy não encontrado em $BSPROXY"
+        echo "❌ BSProxy não encontrado!"
         sleep 3
         return
     fi
-    
     nohup ${BSPROXY} -p ${PORT} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
-    
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta com sucesso!"
+        echo "✅ Porta ${PORT} aberta!"
         echo "📋 Log: /tmp/bsproxy_${PORT}.log"
-        echo ""
-        echo "🧪 Testes:"
-        echo "   SOCKS5: curl --socks5 localhost:${PORT} http://example.com"
-        echo "   TLS: openssl s_client -connect localhost:${PORT}"
-        echo "   WebSocket: wscat -c ws://localhost:${PORT}"
-        echo "   TCP: telnet localhost ${PORT}"
     else
-        echo "❌ Falha ao abrir porta ${PORT}!"
+        echo "❌ Falha!"
         rm -f "${PID_FILE}${PORT}.pid"
     fi
-    sleep 3
+    sleep 2
 }
 
 close_port() {
@@ -86,7 +76,7 @@ close_port() {
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         kill -9 $(cat "${PID_FILE}${PORT}.pid") 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
-        echo "✅ Porta ${PORT} fechada com sucesso!"
+        echo "✅ Porta ${PORT} fechada!"
     else
         echo "❌ Porta ${PORT} não está aberta!"
     fi
