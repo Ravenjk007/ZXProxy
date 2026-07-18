@@ -1,91 +1,104 @@
-mod socks5;
-mod tls;
-mod websocket;
-mod tcp_fallback;
+#!/bin/bash
+BSPROXY="/opt/bsproxy/proxy"
+PID_FILE="/tmp/bsproxy_"
 
-use tokio::net::TcpListener;
-use tokio::io::AsyncReadExt;
-use clap::Parser;
-use anyhow::Result;
-use log::{info, error};
-use std::process::Command;
-
-#[derive(Parser)]
-#[command(name = "bsproxy")]
-#[command(about = "Multiprotocol proxy server (SOCKS5 + TLS + WebSocket + TCP)")]
-struct Cli {
-    #[arg(short = 'p', long = "port", default_value = "")]
-    port: String,
-    #[arg(short = 'd', long = "debug")]
-    debug: bool,
+show_menu() {
+    clear
+    echo "====================================="
+    echo "          QBSManager                 "
+    echo "====================================="
+    echo "          BSPROXY                    "
+    echo ""
+    
+    ACTIVE_PORTS=""
+    for pidfile in ${PID_FILE}*.pid; do
+        if [ -f "$pidfile" ]; then
+            PORT=$(basename "$pidfile" .pid | sed 's/bsproxy_//')
+            if ps -p $(cat "$pidfile") > /dev/null 2>&1; then
+                ACTIVE_PORTS="$ACTIVE_PORTS $PORT"
+            else
+                rm -f "$pidfile"
+            fi
+        fi
+    done
+    
+    if [ -n "$ACTIVE_PORTS" ]; then
+        echo "Porta(s) aberta(s):$ACTIVE_PORTS"
+    else
+        echo "Porta(s): nenhuma"
+    fi
+    echo ""
+    echo "📡 SOCKS5 | TLS | WebSocket | TCP"
+    echo ""
+    echo " 1 - Abrir Porta"
+    echo " 2 - Fechar Porta"
+    echo " 3 - Sair"
+    echo ""
+    echo -n "--> Selecione uma opção: "
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cli = Cli::parse();
+open_port() {
+    read -p "Digite o número da porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Porta inválida!"
+        sleep 2
+        return
+    fi
     
-    if cli.port.is_empty() {
-        show_menu();
-        return Ok(());
-    }
+    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
+        echo "❌ Porta ${PORT} já está aberta!"
+        sleep 2
+        return
+    fi
     
-    if cli.debug {
-        env_logger::init();
-    } else {
-        env_logger::builder()
-            .filter_level(log::LevelFilter::Info)
-            .init();
-    }
+    echo "🔓 Abrindo porta ${PORT}..."
     
-    let addr = format!("0.0.0.0:{}", cli.port);
-    let listener = TcpListener::bind(&addr).await?;
-    info!("🚀 BSProxy Multiprotocol listening on {}", addr);
-    info!("📡 Protocols: SOCKS5, TLS, WebSocket, TCP");
-
-    while let Ok((socket, _)) = listener.accept().await {
-        tokio::spawn(async move {
-            let mut buf = [0u8; 16];
-            match socket.peek(&mut buf).await {
-                Ok(n) if n > 0 => {
-                    match buf[0] {
-                        0x05 => {
-                            info!("🔐 SOCKS5");
-                            let _ = socks5::handle_socks5(socket).await;
-                        }
-                        0x16 => {
-                            info!("🔒 TLS");
-                            let _ = tls::handle_tls(socket).await;
-                        }
-                        _ => {
-                            let data_str = String::from_utf8_lossy(&buf[..n]);
-                            if data_str.starts_with("GET ") || data_str.starts_with("HTTP/") {
-                                info!("🌐 WebSocket");
-                                let _ = websocket::handle_websocket(socket).await;
-                            } else {
-                                info!("📦 TCP");
-                                let _ = tcp_fallback::handle_tcp(socket).await;
-                            }
-                        }
-                    }
-                }
-                Ok(_) => {
-                    info!("📦 Connection closed");
-                }
-                Err(e) => error!("Peek error: {}", e),
-            }
-        });
-    }
-    Ok(())
+    if [ ! -f "$BSPROXY" ]; then
+        echo "❌ BSProxy não encontrado em $BSPROXY"
+        sleep 3
+        return
+    fi
+    
+    nohup ${BSPROXY} -p ${PORT} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
+    echo $! > "${PID_FILE}${PORT}.pid"
+    sleep 2
+    
+    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
+        echo "✅ Porta ${PORT} aberta com sucesso!"
+        echo "📋 Log: /tmp/bsproxy_${PORT}.log"
+    else
+        echo "❌ Falha ao abrir porta ${PORT}!"
+        rm -f "${PID_FILE}${PORT}.pid"
+    fi
+    sleep 2
 }
 
-fn show_menu() {
-    let paths = ["./menu.sh", "/opt/bsproxy/menu"];
-    for path in paths {
-        if std::path::Path::new(path).exists() {
-            let _ = Command::new("bash").arg(path).status();
-            return;
-        }
-    }
-    println!("❌ Menu não encontrado!");
-    println!("Execute: /opt/bsproxy/menu");
+close_port() {
+    read -p "Digite o número da porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Porta inválida!"
+        sleep 2
+        return
+    fi
+    
+    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
+        PID=$(cat "${PID_FILE}${PORT}.pid")
+        kill -9 ${PID} 2>/dev/null
+        rm -f "${PID_FILE}${PORT}.pid"
+        echo "✅ Porta ${PORT} fechada com sucesso!"
+    else
+        echo "❌ Porta ${PORT} não está aberta!"
+    fi
+    sleep 2
 }
+
+while true; do
+    show_menu
+    read OPTION
+    case $OPTION in
+        1) open_port ;;
+        2) close_port ;;
+        3) echo "👋 Saindo..."; exit 0 ;;
+        *) echo "❌ Opção inválida!"; sleep 2 ;;
+    esac
+done
