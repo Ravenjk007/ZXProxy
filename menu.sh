@@ -74,7 +74,7 @@ close_port() {
         return
     fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        kill -9 $(cat "${PID_FILE}${PORT}.pid") 2>/dev/null
+        kill -9 $(cat "${PID_FILE}${PORT}.pid}) 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
         echo "✅ Porta ${PORT} fechada!"
     else
