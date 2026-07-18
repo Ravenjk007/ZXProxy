@@ -25,6 +25,8 @@ show_menu() {
         echo "Porta(s): nenhuma"
     fi
     echo ""
+    echo "📡 SOCKS5 | TLS | WebSocket | SECURITY | TCP"
+    echo ""
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
     echo " 3 - Sair"
@@ -57,7 +59,7 @@ open_port() {
         echo "✅ Porta ${PORT} aberta!"
         echo "📋 Log: /tmp/bsproxy_${PORT}.log"
     else
-        echo "❌ Falha ao abrir porta ${PORT}!"
+        echo "❌ Falha!"
         rm -f "${PID_FILE}${PORT}.pid"
     fi
     sleep 2
