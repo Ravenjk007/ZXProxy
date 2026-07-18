@@ -1,4 +1,3 @@
-cat > src/tls.rs << 'EOF'
 use tokio::net::TcpStream;
 use tokio_rustls::TlsAcceptor;
 use rustls::{ServerConfig, Certificate, PrivateKey};
@@ -33,4 +32,3 @@ pub async fn handle(socket: TcpStream) -> Result<()> {
     }
     Ok(())
 }
-EOF
