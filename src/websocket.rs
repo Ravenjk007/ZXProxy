@@ -1,4 +1,3 @@
-cat > src/websocket.rs << 'EOF'
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use anyhow::Result;
@@ -36,7 +35,6 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
     socket.write_all(response.as_bytes()).await?;
     info!("🌐 WebSocket handshake complete! Encaminhando para SSH...");
     
-    // Encaminhar para SSH (ou outro destino)
     let target = "127.0.0.1:22";
     
     match TcpStream::connect(target).await {
@@ -59,4 +57,3 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
         }
     }
 }
-EOF
