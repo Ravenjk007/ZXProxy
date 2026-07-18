@@ -1,4 +1,3 @@
-cat > src/security.rs << 'EOF'
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use anyhow::Result;
@@ -23,4 +22,3 @@ pub async fn handle_security(mut socket: TcpStream) -> Result<()> {
     
     Ok(())
 }
-EOF
