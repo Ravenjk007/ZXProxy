@@ -40,7 +40,7 @@ EOF
 # Criar diretório src
 mkdir -p src
 
-# Criar main.rs
+# Criar main.rs (COM MENU INTEGRADO)
 cat > src/main.rs << 'EOF'
 mod socks5;
 mod tls;
@@ -51,13 +51,14 @@ use tokio::io::AsyncReadExt;
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
+use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "bsproxy")]
 #[command(about = "Multiprotocol proxy server (SOCKS5 + TLS + TCP)", long_about = None)]
 struct Cli {
-    #[arg(short = 'p', long = "port", default_value = "8080")]
-    port: u16,
+    #[arg(short = 'p', long = "port", default_value = "")]
+    port: String,
     #[arg(short = 'd', long = "debug")]
     debug: bool,
 }
@@ -66,6 +67,13 @@ struct Cli {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     
+    // Se não foi passada porta, abre o menu
+    if cli.port.is_empty() {
+        show_menu();
+        return Ok(());
+    }
+    
+    // Se foi passada porta, inicia o proxy
     if cli.debug {
         env_logger::init();
     } else {
@@ -105,9 +113,31 @@ async fn main() -> Result<()> {
     }
     Ok(())
 }
+
+fn show_menu() {
+    // Verifica se o menu.sh existe no diretório atual
+    let menu_path = "./menu.sh";
+    if std::path::Path::new(menu_path).exists() {
+        let _ = Command::new("bash")
+            .arg(menu_path)
+            .status();
+    } else {
+        // Se não encontrar, procura no diretório do projeto
+        let home = std::env::var("HOME").unwrap_or_else(|_| "~".to_string());
+        let menu_path2 = format!("{}/BSProxy/menu.sh", home);
+        if std::path::Path::new(&menu_path2).exists() {
+            let _ = Command::new("bash")
+                .arg(&menu_path2)
+                .status();
+        } else {
+            println!("❌ Menu não encontrado!");
+            println!("Execute: ~/BSProxy/menu.sh");
+        }
+    }
+}
 EOF
 
-# Criar socks5.rs
+# Criar socks5.rs (mesmo de antes)
 cat > src/socks5.rs << 'EOF'
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -235,7 +265,7 @@ pub async fn handle(mut socket: TcpStream) -> Result<()> {
 }
 EOF
 
-# Criar menu.sh
+# Criar menu.sh (QBSManager)
 cat > menu.sh << 'EOF'
 #!/bin/bash
 BSPROXY="./target/release/bsproxy"
@@ -284,7 +314,7 @@ open_port() {
         sleep 2
         return
     fi
-    echo "🔓 Abrindo porta ${PORT}..."
+    echo "🔓 Abrindo porta ${PORT} com multiprotocolo..."
     if [ ! -f "$BSPROXY" ]; then
         echo "📦 Compilando..."
         cargo build --release
@@ -295,11 +325,14 @@ open_port() {
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta!"
         echo "📋 Log: /tmp/bsproxy_${PORT}.log"
+        echo ""
+        echo "🧪 Teste SOCKS5: curl --socks5 localhost:${PORT} http://example.com"
+        echo "🧪 Teste TLS: openssl s_client -connect localhost:${PORT}"
     else
-        echo "❌ Falha!"
+        echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
     fi
-    sleep 2
+    sleep 3
 }
 
 close_port() {
@@ -348,8 +381,9 @@ echo ""
 echo "✅ INSTALAÇÃO CONCLUÍDA!"
 echo ""
 echo "🚀 Comandos:"
-echo "   bsproxy -p 80          # Abrir porta 80"
-echo "   ./menu.sh              # Menu interativo"
+echo "   bsproxy              # Abre o menu interativo"
+echo "   bsproxy -p 80        # Abre porta 80 diretamente"
+echo "   ./menu.sh            # Menu interativo (alternativo)"
 echo ""
 echo "🧪 Testes:"
 echo "   curl --socks5 localhost:80 http://example.com"
