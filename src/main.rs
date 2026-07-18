@@ -1,3 +1,5 @@
+mkdir -p src
+cat > src/main.rs << 'EOF'
 mod socks5;
 mod tls;
 mod websocket;
@@ -8,12 +10,12 @@ use tokio::net::TcpListener;
 use tokio::io::AsyncReadExt;
 use clap::Parser;
 use anyhow::Result;
-use log::{info, error, warn};
+use log::{info, error};
 use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "bsproxy")]
-#[command(about = "Multiprotocol proxy server (SOCKS5 + TLS + WebSocket + TCP + SECURITY)")]
+#[command(about = "Multiprotocol proxy server")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "")]
     port: String,
@@ -38,25 +40,10 @@ async fn main() -> Result<()> {
             .init();
     }
     
-    let port = cli.port.parse::<u16>().unwrap_or(8080);
-    let addr = format!("0.0.0.0:{}", port);
-    
-    // Verificação especial para porta 443
-    if port == 443 {
-        warn!("⚠️ Porta 443 requer certificado SSL/TLS!");
-        warn!("📂 Certificados procurados em: /opt/bsproxy/cert.pem e /opt/bsproxy/cert.key");
-        warn!("   Ou use: certbot certonly --standalone -d seu-dominio.com");
-        warn!("   Depois copie: cp /etc/letsencrypt/live/seu-dominio.com/* /opt/bsproxy/");
-        
-        // Verifica se o certificado existe
-        if !std::path::Path::new("/opt/bsproxy/cert.pem").exists() {
-            warn!("⚠️ Certificado não encontrado! Usando self-signed (clientes vão ver erro)");
-        }
-    }
-    
+    let addr = format!("0.0.0.0:{}", cli.port);
     let listener = TcpListener::bind(&addr).await?;
-    info!("🚀 BSProxy Multiprotocol listening on {}", addr);
-    info!("📡 Protocols: SOCKS5, TLS, WebSocket, SECURITY, TCP");
+    info!("🚀 BSProxy listening on {}", addr);
+    info!("📡 Protocols: SOCKS5, TLS, WebSocket, TCP");
 
     while let Ok((socket, _)) = listener.accept().await {
         tokio::spawn(async move {
@@ -69,7 +56,7 @@ async fn main() -> Result<()> {
                             let _ = socks5::handle_socks5(socket).await;
                         }
                         0x16 => {
-                            info!("🔒 TLS/SECURITY");
+                            info!("🔒 TLS");
                             let _ = tls::handle_tls(socket).await;
                         }
                         _ => {
@@ -78,7 +65,7 @@ async fn main() -> Result<()> {
                                 info!("🌐 WebSocket");
                                 let _ = websocket::handle_websocket(socket).await;
                             } else if data_str.starts_with("SECURITY") || data_str.starts_with("AUTH") {
-                                info!("🔐 SECURITY (custom)");
+                                info!("🔐 SECURITY");
                                 let _ = security::handle_security(socket).await;
                             } else {
                                 info!("📦 TCP");
@@ -113,5 +100,5 @@ fn show_menu() {
         }
     }
     println!("❌ Menu não encontrado!");
-    println!("Execute: /opt/bsproxy/menu");
 }
+EOF
