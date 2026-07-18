@@ -1,4 +1,3 @@
-cat > /opt/bsproxy/menu << 'EOF'
 #!/bin/bash
 BSPROXY="/opt/bsproxy/proxy"
 PID_FILE="/tmp/bsproxy_"
@@ -43,8 +42,6 @@ is_port_in_use() {
         PID=$(cat "${PID_FILE}${PORT}.pid")
         if ps -p $PID > /dev/null 2>&1; then
             return 0
-        else
-            rm -f "${PID_FILE}${PORT}.pid"
         fi
     fi
     return 1
@@ -59,8 +56,7 @@ stop_port() {
         systemctl daemon-reload
     fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        PID=$(cat "${PID_FILE}${PORT}.pid")
-        kill -9 $PID 2>/dev/null
+        kill -9 $(cat "${PID_FILE}${PORT}.pid") 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
     fi
     pkill -f "bsproxy -p ${PORT}" 2>/dev/null
@@ -92,7 +88,6 @@ open_port() {
         return
     fi
     
-    # Perguntas estilo Dtunnel
     echo ""
     read -p "Deseja habilitar SSL? (s/n) [n]: " SSL_ENABLE
     SSL_ENABLE=${SSL_ENABLE:-n}
@@ -108,7 +103,6 @@ open_port() {
     echo ""
     echo -e "${YELLOW}🔓 Abrindo porta ${PORT}...${NC}"
     echo -e "${CYAN}📡 Protocolos: SOCKS5 | TLS | WebSocket | SECURITY | TCP${NC}"
-    echo -e "${CYAN}🔒 SSL: ${SSL_ENABLE} | HTTP: ${HTTP_MODE} | SSH: ${SSH_ONLY}${NC}"
     
     CMD="${BSPROXY} -p ${PORT}"
     
@@ -116,7 +110,7 @@ open_port() {
         CMD="${CMD} --ssl"
     fi
     
-    # Criar systemd service
+    # Systemd service
     cat > "${SERVICE_DIR}/proxy-${PORT}.service" << SERVICE
 [Unit]
 Description=BSProxy on port ${PORT}
@@ -137,7 +131,6 @@ SERVICE
     systemctl enable "proxy-${PORT}.service"
     systemctl start "proxy-${PORT}.service"
     
-    # Fallback: nohup
     nohup ${CMD} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
     
@@ -151,7 +144,6 @@ SERVICE
     else
         echo -e "${RED}❌ Falha ao abrir porta ${PORT}!${NC}"
         rm -f "${PID_FILE}${PORT}.pid"
-        systemctl disable "proxy-${PORT}.service" 2>/dev/null
         rm -f "${SERVICE_DIR}/proxy-${PORT}.service"
         systemctl daemon-reload
     fi
@@ -186,7 +178,7 @@ close_port() {
     
     if is_port_in_use $PORT; then
         stop_port $PORT
-        echo -e "${GREEN}✅ Porta ${PORT} fechada com sucesso!${NC}"
+        echo -e "${GREEN}✅ Porta ${PORT} fechada!${NC}"
     else
         echo -e "${RED}❌ Porta ${PORT} não está aberta!${NC}"
     fi
@@ -223,7 +215,6 @@ restart_port() {
         echo -e "${YELLOW}🔄 Reiniciando porta ${PORT}...${NC}"
         stop_port $PORT
         sleep 2
-        # Reabrir com as mesmas opções (simplificado)
         open_port_restart $PORT
     else
         echo -e "${RED}❌ Porta ${PORT} não está aberta!${NC}"
@@ -233,12 +224,6 @@ restart_port() {
 
 open_port_restart() {
     local PORT=$1
-    
-    if [ ! -f "$BSPROXY" ]; then
-        echo -e "${RED}❌ BSProxy não encontrado!${NC}"
-        return
-    fi
-    
     CMD="${BSPROXY} -p ${PORT}"
     
     cat > "${SERVICE_DIR}/proxy-${PORT}.service" << SERVICE
@@ -354,8 +339,3 @@ while true; do
             ;;
     esac
 done
-EOF
-
-chmod +x /opt/bsproxy/menu
-cp /opt/bsproxy/menu /usr/local/bin/bsproxy
-chmod +x /usr/local/bin/bsproxy
