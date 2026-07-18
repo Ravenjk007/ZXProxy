@@ -1,62 +1,99 @@
+use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
 use log::info;
 
-pub async fn handle(mut socket: TcpStream) -> Result<()> {
-    let mut buf = [0u8; 2];
-    socket.read_exact(&mut buf).await?;
-    if buf[0] != 0x05 { anyhow::bail!("Invalid SOCKS"); }
-    socket.write_all(&[0x05, 0x00]).await?;
-    let mut req = [0u8; 4];
-    socket.read_exact(&mut req).await?;
-    if req[0] != 0x05 { anyhow::bail!("Invalid SOCKS request"); }
-    match req[1] {
-        0x01 => handle_connect(socket).await,
-        _ => anyhow::bail!("Unsupported SOCKS command"),
-    }
-}
+/// Implementação SOCKS5 (RFC 1928) - suporta CONNECT
+pub async fn handle_socks5(mut client: TcpStream) -> Result<()> {
+    info!("🔐 SOCKS5 handshake");
+    
+    // --- Etapa 1: negociação do método de autenticação ---
+    let mut header = [0u8; 2];
+    client.read_exact(&mut header).await?;
+    let nmethods = header[1] as usize;
 
-async fn handle_connect(mut socket: TcpStream) -> Result<()> {
-    let mut addr_type = [0u8; 1];
-    socket.read_exact(&mut addr_type).await?;
-    let target = match addr_type[0] {
+    let mut methods = vec![0u8; nmethods];
+    client.read_exact(&mut methods).await?;
+
+    // Responder sem autenticação (0x00)
+    client.write_all(&[0x05, 0x00]).await?;
+
+    // --- Etapa 2: requisição de conexão ---
+    let mut req = [0u8; 4];
+    client.read_exact(&mut req).await?;
+    let cmd = req[1];
+    let atyp = req[3];
+
+    let target_addr = match atyp {
         0x01 => {
-            let mut ip = [0u8; 4];
-            socket.read_exact(&mut ip).await?;
-            let mut port = [0u8; 2];
-            socket.read_exact(&mut port).await?;
-            format!("{}:{}", 
-                ip.iter().map(|b| b.to_string()).collect::<Vec<_>>().join("."),
-                u16::from_be_bytes(port)
-            )
+            // Endereço IPv4
+            let mut addr = [0u8; 4];
+            client.read_exact(&mut addr).await?;
+            let port = read_port(&mut client).await?;
+            format!("{}.{}.{}.{}:{}", addr[0], addr[1], addr[2], addr[3], port)
         }
         0x03 => {
-            let mut len = [0u8; 1];
-            socket.read_exact(&mut len).await?;
-            let mut domain = vec![0u8; len[0] as usize];
-            socket.read_exact(&mut domain).await?;
-            let mut port = [0u8; 2];
-            socket.read_exact(&mut port).await?;
-            format!("{}:{}", String::from_utf8_lossy(&domain), u16::from_be_bytes(port))
+            // Nome de domínio
+            let mut len_buf = [0u8; 1];
+            client.read_exact(&mut len_buf).await?;
+            let len = len_buf[0] as usize;
+
+            let mut domain = vec![0u8; len];
+            client.read_exact(&mut domain).await?;
+            let port = read_port(&mut client).await?;
+            format!("{}:{}", String::from_utf8_lossy(&domain), port)
         }
-        _ => anyhow::bail!("Unsupported address type"),
+        0x04 => {
+            // Endereço IPv6
+            let mut addr = [0u8; 16];
+            client.read_exact(&mut addr).await?;
+            let port = read_port(&mut client).await?;
+            let segs: Vec<String> = addr
+                .chunks(2)
+                .map(|c| format!("{:02x}{:02x}", c[0], c[1]))
+                .collect();
+            format!("[{}]:{}", segs.join(":"), port)
+        }
+        _ => {
+            send_reply(&mut client, 0x08).await?;
+            anyhow::bail!("Unsupported address type");
+        }
     };
-    info!("SOCKS5 -> {}", target);
-    match TcpStream::connect(&target).await {
-        Ok(target_stream) => {
-            socket.write_all(&[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
-            let (mut reader, mut writer) = socket.into_split();
-            let (mut target_reader, mut target_writer) = target_stream.into_split();
+
+    if cmd != 0x01 {
+        send_reply(&mut client, 0x07).await?;
+        anyhow::bail!("Unsupported SOCKS command");
+    }
+
+    info!("🔐 SOCKS5 connecting to: {}", target_addr);
+
+    match TcpStream::connect(&target_addr).await {
+        Ok(remote) => {
+            send_reply(&mut client, 0x00).await?;
+            let (mut client_reader, mut client_writer) = client.into_split();
+            let (mut remote_reader, mut remote_writer) = remote.into_split();
+            
             tokio::try_join!(
-                tokio::io::copy(&mut reader, &mut target_writer),
-                tokio::io::copy(&mut target_reader, &mut writer)
+                tokio::io::copy(&mut client_reader, &mut remote_writer),
+                tokio::io::copy(&mut remote_reader, &mut client_writer)
             )?;
             Ok(())
         }
-        Err(_) => {
-            socket.write_all(&[0x05, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
-            anyhow::bail!("Connection failed")
+        Err(e) => {
+            send_reply(&mut client, 0x05).await?;
+            anyhow::bail!("Connection failed: {}", e);
         }
     }
+}
+
+async fn read_port(client: &mut TcpStream) -> std::io::Result<u16> {
+    let mut port_buf = [0u8; 2];
+    client.read_exact(&mut port_buf).await?;
+    Ok(u16::from_be_bytes(port_buf))
+}
+
+async fn send_reply(client: &mut TcpStream, code: u8) -> std::io::Result<()> {
+    client
+        .write_all(&[0x05, code, 0x00, 0x01, 0, 0, 0, 0, 0, 0])
+        .await
 }
