@@ -1,10 +1,11 @@
+cat > src/tcp_fallback.rs << 'EOF'
 use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};  // <--- IMPORTANTE!
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
 use log::info;
 
 pub async fn handle(mut socket: TcpStream) -> Result<()> {
-    info!("📦 TCP Fallback: echo");
+    info!("📦 TCP echo");
     let mut buf = [0u8; 1024];
     loop {
         match socket.read(&mut buf).await {
@@ -19,3 +20,4 @@ pub async fn handle(mut socket: TcpStream) -> Result<()> {
     }
     Ok(())
 }
+EOF
