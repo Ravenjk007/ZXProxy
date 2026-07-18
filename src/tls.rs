@@ -9,7 +9,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 pub async fn handle_tls(socket: TcpStream) -> Result<()> {
     info!("🔒 TLS/SECURITY handshake...");
     
-    // Gerar certificado self-signed (igual wssecury)
     let cert = rcgen::generate_simple_self_signed(vec!["localhost".to_string()])?;
     let cert_der = cert.serialize_der()?;
     let key_der = cert.serialize_private_key_der();
@@ -24,27 +23,18 @@ pub async fn handle_tls(socket: TcpStream) -> Result<()> {
     
     info!("🔒 TLS handshake complete!");
     
-    // Encaminhar para SSH (igual wssecury)
-    let target = "127.0.0.1:22";
-    
-    match TcpStream::connect(target).await {
-        Ok(remote) => {
-            info!("✅ Conectado ao SSH na porta 22");
-            
-            let (mut client_reader, mut client_writer) = tls_stream.into_split();
-            let (mut remote_reader, mut remote_writer) = remote.into_split();
-            
-            tokio::try_join!(
-                tokio::io::copy(&mut client_reader, &mut remote_writer),
-                tokio::io::copy(&mut remote_reader, &mut client_writer)
-            )?;
-            
-            info!("🔚 Conexão TLS->SSH encerrada");
-            Ok(())
-        }
-        Err(e) => {
-            info!("❌ Falha ao conectar ao SSH: {}", e);
-            anyhow::bail!("SSH connection failed: {}", e)
+    let mut buf = [0u8; 1024];
+    loop {
+        match tls_stream.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                let msg = String::from_utf8_lossy(&buf[..n]);
+                let response = format!("SECURE: {}", msg);
+                tls_stream.write_all(response.as_bytes()).await?;
+            }
+            Err(e) => anyhow::bail!("TLS error: {}", e),
         }
     }
+    
+    Ok(())
 }
