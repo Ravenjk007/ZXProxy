@@ -44,7 +44,7 @@ async fn handle_connect(mut socket: TcpStream) -> Result<()> {
     };
     info!("SOCKS5 -> {}", target);
     match TcpStream::connect(&target).await {
-        Ok(mut target_stream) => {
+        Ok(target_stream) => {
             socket.write_all(&[0x05, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]).await?;
             let (mut reader, mut writer) = socket.into_split();
             let (mut target_reader, mut target_writer) = target_stream.into_split();
