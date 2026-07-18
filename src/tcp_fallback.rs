@@ -1,4 +1,3 @@
-cat > src/tcp_fallback.rs << 'EOF'
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
@@ -20,4 +19,3 @@ pub async fn handle(mut socket: TcpStream) -> Result<()> {
     }
     Ok(())
 }
-EOF
