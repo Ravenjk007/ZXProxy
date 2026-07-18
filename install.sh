@@ -1,6 +1,8 @@
 #!/bin/bash
+# BSProxy Installer
 REPO_URL="https://github.com/Ravenjk007/BSProxy.git"
 REPO_BRANCH="main"
+CMD_NAME="bsproxy"
 
 echo "🔧 Instalando BSProxy..."
 
@@ -80,7 +82,7 @@ open_port() {
     nohup ${BSPROXY} -p ${PORT} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
-    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
+    if ps -p $(cat "${PID_FILE}${PORT}.pid}) > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta!"
     else
         echo "❌ Falha!"
