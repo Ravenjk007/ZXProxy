@@ -1,3 +1,4 @@
+cat > src/main.rs << 'EOF'
 mod socks5;
 mod tls;
 mod tcp_fallback;
@@ -12,7 +13,7 @@ use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "bsproxy")]
-#[command(about = "Multiprotocol proxy server (SOCKS5 + TLS + TCP + WebSocket)", long_about = None)]
+#[command(about = "Multiprotocol proxy server", long_about = None)]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "")]
     port: String,
@@ -40,39 +41,35 @@ async fn main() -> Result<()> {
     let addr = format!("0.0.0.0:{}", cli.port);
     let listener = TcpListener::bind(&addr).await?;
     info!("🚀 BSProxy Multiprotocol listening on {}", addr);
-    info!("📡 Protocols: SOCKS5, TLS/SECURITY, WebSocket, TCP Fallback");
+    info!("📡 Protocols: SOCKS5, TLS, WebSocket, TCP");
 
     while let Ok((mut socket, _)) = listener.accept().await {
         tokio::spawn(async move {
             let mut buf = [0u8; 16];
             match socket.peek(&mut buf).await {
                 Ok(n) if n > 0 => {
-                    let peek_data = &buf[..n];
-                    
-                    // Detectar protocolo pelo primeiro byte ou padrão
                     match buf[0] {
                         0x05 => {
-                            info!("🔐 SOCKS5 connection");
+                            info!("🔐 SOCKS5");
                             let _ = socks5::handle(socket).await;
                         }
                         0x16 => {
-                            info!("🔒 TLS/SECURITY connection");
+                            info!("🔒 TLS");
                             let _ = tls::handle(socket).await;
                         }
                         _ => {
-                            // Verificar se é WebSocket (começa com "GET " ou "HTTP/")
-                            let data_str = String::from_utf8_lossy(peek_data);
+                            let data_str = String::from_utf8_lossy(&buf[..n]);
                             if data_str.starts_with("GET ") || data_str.starts_with("HTTP/") {
-                                info!("🌐 WebSocket connection detected");
+                                info!("🌐 WebSocket");
                                 let _ = websocket::handle(socket).await;
                             } else {
-                                info!("📦 TCP Fallback connection");
+                                info!("📦 TCP");
                                 let _ = tcp_fallback::handle(socket).await;
                             }
                         }
                     }
                 }
-                Err(e) => error!("Failed to peek: {}", e),
+                Err(e) => error!("Peek error: {}", e),
             }
         });
     }
@@ -80,22 +77,13 @@ async fn main() -> Result<()> {
 }
 
 fn show_menu() {
-    let menu_paths = [
-        "./menu.sh",
-        "/opt/bsproxy/menu",
-        "/usr/local/bin/menu",
-        &format!("{}/BSProxy/menu.sh", std::env::var("HOME").unwrap_or_else(|_| "~".to_string())),
-    ];
-    
-    for path in menu_paths {
+    let paths = ["./menu.sh", "/opt/bsproxy/menu"];
+    for path in paths {
         if std::path::Path::new(path).exists() {
-            let _ = Command::new("bash")
-                .arg(path)
-                .status();
+            let _ = Command::new("bash").arg(path).status();
             return;
         }
     }
-    
     println!("❌ Menu não encontrado!");
-    println!("Execute: /opt/bsproxy/menu");
 }
+EOF
