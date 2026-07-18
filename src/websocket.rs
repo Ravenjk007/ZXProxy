@@ -1,4 +1,5 @@
-use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
+cat > src/websocket.rs << 'EOF'
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use anyhow::Result;
 use log::info;
@@ -33,27 +34,74 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
                     \r\n";
     
     socket.write_all(response.as_bytes()).await?;
-    info!("🌐 WebSocket handshake complete! Encaminhando para SSH...");
+    info!("🌐 WebSocket handshake complete!");
     
-    let target = "127.0.0.1:22";
-    
-    match TcpStream::connect(target).await {
-        Ok(remote) => {
-            info!("✅ Conectado ao SSH na porta 22");
-            let (mut client_reader, mut client_writer) = socket.into_split();
-            let (mut remote_reader, mut remote_writer) = remote.into_split();
-            
-            tokio::try_join!(
-                tokio::io::copy(&mut client_reader, &mut remote_writer),
-                tokio::io::copy(&mut remote_reader, &mut client_writer)
-            )?;
-            
-            info!("🔚 Conexão WebSocket->SSH encerrada");
-            Ok(())
-        }
-        Err(e) => {
-            info!("❌ Falha ao conectar ao SSH: {}", e);
-            anyhow::bail!("SSH connection failed: {}", e)
+    loop {
+        let mut header = [0u8; 2];
+        match socket.read_exact(&mut header).await {
+            Ok(_) => {
+                let opcode = header[0] & 0x0F;
+                let mut payload_len = (header[1] & 0x7F) as u64;
+                
+                if payload_len == 126 {
+                    let mut ext_len = [0u8; 2];
+                    socket.read_exact(&mut ext_len).await?;
+                    payload_len = u16::from_be_bytes(ext_len) as u64;
+                } else if payload_len == 127 {
+                    let mut ext_len = [0u8; 8];
+                    socket.read_exact(&mut ext_len).await?;
+                    payload_len = u64::from_be_bytes(ext_len);
+                }
+                
+                let masked = (header[1] & 0x80) != 0;
+                let mask = if masked {
+                    let mut mask_bytes = [0u8; 4];
+                    socket.read_exact(&mut mask_bytes).await?;
+                    Some(mask_bytes)
+                } else {
+                    None
+                };
+                
+                let mut payload = vec![0u8; payload_len as usize];
+                socket.read_exact(&mut payload).await?;
+                
+                if let Some(mask) = mask {
+                    for (i, byte) in payload.iter_mut().enumerate() {
+                        *byte ^= mask[i % 4];
+                    }
+                }
+                
+                let msg = String::from_utf8_lossy(&payload);
+                info!("📩 WS: {}", msg);
+                
+                if opcode == 0x08 {
+                    break;
+                }
+                
+                let response_data = format!("ECHO: {}", msg);
+                let response_bytes = response_data.as_bytes();
+                
+                let mut response_frame = Vec::new();
+                response_frame.push(0x81);
+                
+                let len = response_bytes.len();
+                if len <= 125 {
+                    response_frame.push(len as u8);
+                } else if len <= 65535 {
+                    response_frame.push(126);
+                    response_frame.extend_from_slice(&(len as u16).to_be_bytes());
+                } else {
+                    response_frame.push(127);
+                    response_frame.extend_from_slice(&(len as u64).to_be_bytes());
+                }
+                
+                response_frame.extend_from_slice(response_bytes);
+                socket.write_all(&response_frame).await?;
+            }
+            Err(_) => break,
         }
     }
+    
+    Ok(())
 }
+EOF
