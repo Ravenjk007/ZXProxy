@@ -1,4 +1,3 @@
-cat > src/websocket.rs << 'EOF'
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use anyhow::Result;
@@ -36,6 +35,7 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
     socket.write_all(response.as_bytes()).await?;
     info!("🌐 WebSocket handshake complete!");
     
+    // Eco simples para teste
     loop {
         let mut header = [0u8; 2];
         match socket.read_exact(&mut header).await {
@@ -104,4 +104,3 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
     
     Ok(())
 }
-EOF
