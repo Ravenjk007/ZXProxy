@@ -12,8 +12,6 @@ anyhow = "1.0"
 log = "0.4"
 env_logger = "0.10"
 clap = { version = "4.4", features = ["derive"] }
-sha1 = "0.10"
-base64 = "0.21"
 
 [[bin]]
 name = "bsproxy"
