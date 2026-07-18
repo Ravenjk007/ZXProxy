@@ -10,7 +10,6 @@ use tokio::io::AsyncReadExt;
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
-use std::process::Command;
 
 #[derive(Parser)]
 #[command(name = "bsproxy")]
