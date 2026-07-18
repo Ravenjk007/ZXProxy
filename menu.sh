@@ -9,6 +9,7 @@ show_menu() {
     echo "====================================="
     echo "          BSPROXY                    "
     echo ""
+    
     ACTIVE_PORTS=""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
@@ -20,6 +21,7 @@ show_menu() {
             fi
         fi
     done
+    
     if [ -n "$ACTIVE_PORTS" ]; then
         echo "Porta(s) aberta(s):$ACTIVE_PORTS"
     else
@@ -42,25 +44,30 @@ open_port() {
         sleep 2
         return
     fi
+    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         echo "❌ Porta ${PORT} já está aberta!"
         sleep 2
         return
     fi
+    
     echo "🔓 Abrindo porta ${PORT}..."
+    
     if [ ! -f "$BSPROXY" ]; then
-        echo "❌ BSProxy não encontrado!"
+        echo "❌ BSProxy não encontrado em $BSPROXY"
         sleep 3
         return
     fi
+    
     nohup ${BSPROXY} -p ${PORT} > "/tmp/bsproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
+    
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta!"
+        echo "✅ Porta ${PORT} aberta com sucesso!"
         echo "📋 Log: /tmp/bsproxy_${PORT}.log"
     else
-        echo "❌ Falha!"
+        echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
     fi
     sleep 2
@@ -73,10 +80,12 @@ close_port() {
         sleep 2
         return
     fi
+    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        kill -9 $(cat "${PID_FILE}${PORT}.pid}) 2>/dev/null
+        PID=$(cat "${PID_FILE}${PORT}.pid")
+        kill -9 ${PID} 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
-        echo "✅ Porta ${PORT} fechada!"
+        echo "✅ Porta ${PORT} fechada com sucesso!"
     else
         echo "❌ Porta ${PORT} não está aberta!"
     fi
