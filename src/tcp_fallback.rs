@@ -1,10 +1,11 @@
+use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use anyhow::Result;
 use log::info;
 
-pub async fn handle(mut socket: TcpStream) -> Result<()> {
+pub async fn handle_tcp(mut socket: TcpStream) -> Result<()> {
     info!("📦 TCP echo");
+    
     let mut buf = [0u8; 1024];
     loop {
         match socket.read(&mut buf).await {
@@ -17,5 +18,6 @@ pub async fn handle(mut socket: TcpStream) -> Result<()> {
             Err(e) => anyhow::bail!("TCP error: {}", e),
         }
     }
+    
     Ok(())
 }
