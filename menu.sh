@@ -26,6 +26,8 @@ show_menu() {
         echo "Porta(s): nenhuma"
     fi
     echo ""
+    echo "📡 Protocolos: SOCKS5 | TLS | WebSocket | TCP"
+    echo ""
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
     echo " 3 - Sair"
@@ -46,7 +48,7 @@ open_port() {
         return
     fi
     echo "🔓 Abrindo porta ${PORT} com multiprotocolo..."
-    echo "   Protocols: SOCKS5 + TLS/SECURITY + TCP Fallback"
+    echo "   Protocols: SOCKS5 + TLS/SECURITY + WebSocket + TCP Fallback"
     
     if [ ! -f "$BSPROXY" ]; then
         echo "❌ BSProxy não encontrado em $BSPROXY"
@@ -62,8 +64,11 @@ open_port() {
         echo "✅ Porta ${PORT} aberta com sucesso!"
         echo "📋 Log: /tmp/bsproxy_${PORT}.log"
         echo ""
-        echo "🧪 Teste SOCKS5: curl --socks5 localhost:${PORT} http://example.com"
-        echo "🧪 Teste TLS: openssl s_client -connect localhost:${PORT}"
+        echo "🧪 Testes:"
+        echo "   SOCKS5: curl --socks5 localhost:${PORT} http://example.com"
+        echo "   TLS: openssl s_client -connect localhost:${PORT}"
+        echo "   WebSocket: wscat -c ws://localhost:${PORT}"
+        echo "   TCP: telnet localhost ${PORT}"
     else
         echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
