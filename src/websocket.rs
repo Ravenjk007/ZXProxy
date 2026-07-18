@@ -1,4 +1,4 @@
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{copy_bidirectional, AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 use anyhow::Result;
 use log::info;
@@ -38,8 +38,8 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
     let target = "127.0.0.1:22";
     
     match TcpStream::connect(target).await {
-        Ok(mut remote) => {
-            info!("✅ Conectado ao destino, encaminhando tráfego...");
+        Ok(remote) => {
+            info!("✅ Conectado ao SSH na porta 22");
             let (mut client_reader, mut client_writer) = socket.into_split();
             let (mut remote_reader, mut remote_writer) = remote.into_split();
             
@@ -48,12 +48,12 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
                 tokio::io::copy(&mut remote_reader, &mut client_writer)
             )?;
             
-            info!("🔚 Conexão encerrada");
+            info!("🔚 Conexão WebSocket->SSH encerrada");
             Ok(())
         }
         Err(e) => {
-            info!("❌ Falha ao conectar ao destino: {}", e);
-            anyhow::bail!("Connection failed: {}", e)
+            info!("❌ Falha ao conectar ao SSH: {}", e);
+            anyhow::bail!("SSH connection failed: {}", e)
         }
     }
 }
