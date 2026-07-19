@@ -82,7 +82,17 @@ else
     fi
 
     cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
-    cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar ZXProxy"
+
+    show_progress "Aplicando correções de código conhecidas..."
+    if [ -f src/websocket.rs ]; then
+        sed -i 's/unwrap_or("localhost")/unwrap_or("localhost".to_string())/' src/websocket.rs
+        sed -i 's/copy_bidirectional(&mut socket, dest)/copy_bidirectional(\&mut socket, \&mut dest)/' src/websocket.rs
+    fi
+    if [ -f src/tcp_fallback.rs ]; then
+        sed -i 's/copy_bidirectional(&mut socket, dest)/copy_bidirectional(\&mut socket, \&mut dest)/' src/tcp_fallback.rs
+    fi
+
+    cargo build --release --jobs "$(nproc)" || error_exit "Falha ao compilar ZXProxy"
 
     BIN_PATH=""
     if [ -f ./target/release/zxproxy ]; then
