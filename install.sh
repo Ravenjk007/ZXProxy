@@ -1,6 +1,6 @@
 #!/bin/bash
 # ZXProxy Installer
-REPO_URL="https://github.com/Ravenjk007/BSProxy.git"
+REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
 TOTAL_STEPS=9
@@ -71,24 +71,31 @@ else
     increment_step
 
     show_progress "Compilando ZXProxy, isso pode levar algum tempo..."
-    if [ -d "/root/BSProxy" ]; then
-        rm -rf /root/BSProxy
+    if [ -d "/root/ZXProxy" ]; then
+        rm -rf /root/ZXProxy
     fi
-    git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/BSProxy > /dev/null 2>&1 || error_exit "Falha ao clonar ZXProxy"
+    git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy > /dev/null 2>&1 || error_exit "Falha ao clonar ZXProxy"
 
-    if [ -f /root/BSProxy/menu.sh ]; then
-        cp /root/BSProxy/menu.sh /opt/zxproxy/menu
+    if [ -f /root/ZXProxy/menu.sh ]; then
+        cp /root/ZXProxy/menu.sh /opt/zxproxy/menu
         chmod +x /opt/zxproxy/menu
     fi
 
-    cd /root/BSProxy || error_exit "Diretório do ZXProxy não encontrado"
+    cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
     cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar ZXProxy"
 
-    if [ -f ./target/release/bsproxy ]; then
-        mv ./target/release/bsproxy /opt/zxproxy/proxy || error_exit "Binário compilado não encontrado"
+    BIN_PATH=""
+    if [ -f ./target/release/zxproxy ]; then
+        BIN_PATH="./target/release/zxproxy"
+    elif [ -f ./target/release/bsproxy ]; then
+        BIN_PATH="./target/release/bsproxy"
+    fi
+
+    if [ -n "$BIN_PATH" ]; then
+        mv "$BIN_PATH" /opt/zxproxy/proxy || error_exit "Falha ao mover o binário compilado"
         chmod +x /opt/zxproxy/proxy
     else
-        error_exit "Binário 'zxproxy' não encontrado após compilação"
+        error_exit "Binário compilado não encontrado (verifique o campo 'name' em [package] no Cargo.toml)"
     fi
     increment_step
 
@@ -107,7 +114,7 @@ else
 
     show_progress "Limpando diretórios temporários..."
     cd /root/
-    rm -rf /root/BSProxy/
+    rm -rf /root/ZXProxy/
     increment_step
 
     echo ""
