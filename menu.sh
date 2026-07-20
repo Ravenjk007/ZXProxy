@@ -28,7 +28,8 @@ show_menu() {
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
     echo " 3 - Status do Proxy"
-    echo " 4 - Sair"
+    echo " 4 - Ver Logs"
+    echo " 5 - Sair"
     echo ""
     echo -n "--> Selecione uma opção: "
 }
@@ -40,11 +41,14 @@ open_port() {
         sleep 2
         return
     fi
+    
+    # Matar processo na porta se existir
+    sudo fuser -k $PORT/tcp 2>/dev/null
+    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        echo "❌ Porta ${PORT} já está aberta!"
-        sleep 2
-        return
+        rm -f "${PID_FILE}${PORT}.pid"
     fi
+    
     echo "🔓 Abrindo porta ${PORT}..."
     if [ ! -f "$ZXPROXY" ]; then
         echo "❌ ZXProxy não encontrado!"
@@ -52,6 +56,7 @@ open_port() {
         return
     fi
     
+    # Iniciar com keep-alive
     if [ "$PORT" -lt 1024 ]; then
         nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     else
@@ -59,14 +64,16 @@ open_port() {
     fi
     
     echo $! > "${PID_FILE}${PORT}.pid"
-    sleep 2
+    sleep 3
+    
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta!"
+        echo "✅ Porta ${PORT} aberta com Keep-Alive!"
         echo "📝 Log: /tmp/zxproxy_${PORT}.log"
+        echo "💓 Conexão mantida viva para VPN/HTTP Inject"
     else
         echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
-        echo "📝 Verifique o log: /tmp/zxproxy_${PORT}.log"
+        echo "📝 Verifique o log:"
         tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
     fi
     sleep 2
@@ -93,6 +100,7 @@ close_port() {
 show_status() {
     echo "📊 Status do ZXProxy:"
     echo "===================="
+    echo ""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
             PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
@@ -100,11 +108,36 @@ show_status() {
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
                 echo "   Log: /tmp/zxproxy_${PORT}.log"
+                echo "   Keep-Alive: Ativo"
+            else
+                echo "❌ Porta $PORT: processo morto"
+                rm -f "$pidfile"
             fi
         fi
     done
+    
+    echo ""
+    echo "🔍 Portas em uso:"
+    sudo ss -tlnp | grep zxproxy || echo "   Nenhuma porta ativa"
     echo ""
     read -p "Pressione Enter para continuar..."
+}
+
+show_logs() {
+    echo "📝 Logs do ZXProxy:"
+    echo "==================="
+    echo ""
+    ls -la /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log encontrado"
+    echo ""
+    read -p "Digite a porta para ver o log (ou Enter para sair): " PORT
+    if [ -n "$PORT" ] && [ -f "/tmp/zxproxy_${PORT}.log" ]; then
+        echo ""
+        echo "=== Últimas 30 linhas do log da porta ${PORT} ==="
+        echo ""
+        tail -n 30 "/tmp/zxproxy_${PORT}.log"
+        echo ""
+        read -p "Pressione Enter para continuar..."
+    fi
 }
 
 while true; do
@@ -114,7 +147,8 @@ while true; do
         1) open_port ;;
         2) close_port ;;
         3) show_status ;;
-        4) echo "👋 Saindo..."; exit 0 ;;
+        4) show_logs ;;
+        5) echo "👋 Saindo..."; exit 0 ;;
         *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
