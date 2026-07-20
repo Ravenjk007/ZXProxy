@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZXProxy Installer
+# ZXProxy Installer - Com Debug
 REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
@@ -72,23 +72,14 @@ else
 
     show_progress "Preparando código fonte ZXProxy..."
     
-    # Limpar diretório antigo
     if [ -d "/root/ZXProxy" ]; then
         rm -rf /root/ZXProxy
     fi
     
-    # Tentar clonar o repositório
-    echo "📥 Clonando repositório..."
-    git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy 2>/dev/null
-    
-    # Se falhar ao clonar, criar projeto do zero
-    if [ $? -ne 0 ] || [ ! -d "/root/ZXProxy/src" ]; then
-        echo "⚠️  Repositório não encontrado, criando projeto do zero..."
-        cd /root
-        cargo new ZXProxy > /dev/null 2>&1 || error_exit "Falha ao criar projeto"
-    fi
-    
-    cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
+    # Criar projeto diretamente (mais confiável)
+    cd /root
+    cargo new ZXProxy > /dev/null 2>&1 || error_exit "Falha ao criar projeto"
+    cd ZXProxy
     
     # Criar Cargo.toml
     cat > Cargo.toml << 'EOF'
@@ -146,55 +137,64 @@ async fn main() -> Result<()> {
         .init();
     
     let addr = format!("0.0.0.0:{}", cli.port);
-    let listener = TcpListener::bind(&addr).await?;
-    info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 Protocols: SOCKS5, TLS, WebSocket, Security, TCP");
-
-    while let Ok((socket, peer_addr)) = listener.accept().await {
-        tokio::spawn(async move {
-            let mut buf = [0u8; 24];
-            match socket.peek(&mut buf).await {
-                Ok(n) if n > 0 => {
-                    match buf[0] {
-                        0x05 => {
-                            info!("🔐 [{}] SOCKS5", peer_addr);
-                            let _ = socks5::handle_socks5(socket).await;
-                        }
-                        0x16 => {
-                            info!("🔒 [{}] TLS/SECURITY", peer_addr);
-                            let _ = tls::handle_tls(socket).await;
-                        }
-                        _ => {
-                            let data_str = String::from_utf8_lossy(&buf[..n]);
-                            if data_str.starts_with("GET ") || 
-                               data_str.starts_with("POST ") || 
-                               data_str.starts_with("PUT ") || 
-                               data_str.starts_with("DELETE ") || 
-                               data_str.starts_with("CONNECT ") ||
-                               data_str.starts_with("HTTP/") {
-                                info!("🌐 [{}] WebSocket/HTTP", peer_addr);
-                                let _ = websocket::handle_websocket(socket).await;
-                            } else if data_str.starts_with("SECURITY") || 
-                                      data_str.starts_with("AUTH") {
-                                info!("🔐 [{}] SECURITY", peer_addr);
-                                let _ = security::handle_security(socket).await;
-                            } else {
-                                info!("📦 [{}] TCP Fallback", peer_addr);
-                                let _ = tcp_fallback::handle_tcp(socket).await;
+    info!("🚀 ZXProxy starting on {}", addr);
+    
+    match TcpListener::bind(&addr).await {
+        Ok(listener) => {
+            info!("✅ ZXProxy listening on {}", addr);
+            info!("📡 Protocols: SOCKS5, TLS, WebSocket, Security, TCP");
+            
+            while let Ok((socket, peer_addr)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut buf = [0u8; 24];
+                    match socket.peek(&mut buf).await {
+                        Ok(n) if n > 0 => {
+                            match buf[0] {
+                                0x05 => {
+                                    info!("🔐 [{}] SOCKS5", peer_addr);
+                                    let _ = socks5::handle_socks5(socket).await;
+                                }
+                                0x16 => {
+                                    info!("🔒 [{}] TLS/SECURITY", peer_addr);
+                                    let _ = tls::handle_tls(socket).await;
+                                }
+                                _ => {
+                                    let data_str = String::from_utf8_lossy(&buf[..n]);
+                                    if data_str.starts_with("GET ") || 
+                                       data_str.starts_with("POST ") || 
+                                       data_str.starts_with("PUT ") || 
+                                       data_str.starts_with("DELETE ") || 
+                                       data_str.starts_with("CONNECT ") ||
+                                       data_str.starts_with("HTTP/") {
+                                        info!("🌐 [{}] WebSocket/HTTP", peer_addr);
+                                        let _ = websocket::handle_websocket(socket).await;
+                                    } else if data_str.starts_with("SECURITY") || 
+                                              data_str.starts_with("AUTH") {
+                                        info!("🔐 [{}] SECURITY", peer_addr);
+                                        let _ = security::handle_security(socket).await;
+                                    } else {
+                                        info!("📦 [{}] TCP Fallback", peer_addr);
+                                        let _ = tcp_fallback::handle_tcp(socket).await;
+                                    }
+                                }
                             }
                         }
+                        Ok(_) => info!("📦 [{}] Connection closed", peer_addr),
+                        Err(e) => error!("❌ [{}] Peek error: {}", peer_addr, e),
                     }
-                }
-                Ok(_) => info!("📦 [{}] Connection closed", peer_addr),
-                Err(e) => error!("❌ [{}] Peek error: {}", peer_addr, e),
+                });
             }
-        });
+        }
+        Err(e) => {
+            error!("❌ Failed to bind to {}: {}", addr, e);
+            return Err(e.into());
+        }
     }
     Ok(())
 }
 EOF
 
-    # Criar src/socks5.rs
+    # Criar os módulos...
     cat > src/socks5.rs << 'EOF'
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -272,7 +272,6 @@ pub async fn handle_socks5(mut client: TcpStream) -> Result<()> {
 }
 EOF
 
-    # Criar src/tcp_fallback.rs
     cat > src/tcp_fallback.rs << 'EOF'
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -286,7 +285,6 @@ pub async fn handle_tcp(mut socket: TcpStream) -> Result<()> {
 }
 EOF
 
-    # Criar src/websocket.rs
     cat > src/websocket.rs << 'EOF'
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
@@ -329,7 +327,6 @@ pub async fn handle_websocket(mut socket: TcpStream) -> Result<()> {
 }
 EOF
 
-    # Criar src/security.rs
     cat > src/security.rs << 'EOF'
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -343,7 +340,6 @@ pub async fn handle_security(mut socket: TcpStream) -> Result<()> {
 }
 EOF
 
-    # Criar src/tls.rs
     cat > src/tls.rs << 'EOF'
 use tokio::io::AsyncWriteExt;
 use tokio::net::TcpStream;
@@ -357,16 +353,59 @@ pub async fn handle_tls(mut socket: TcpStream) -> Result<()> {
 }
 EOF
 
-    # Copiar menu.sh se existir
-    if [ -f /root/ZXProxy/menu.sh ]; then
-        cp /root/ZXProxy/menu.sh /opt/zxproxy/menu
-        chmod +x /opt/zxproxy/menu
+    increment_step
+
+    show_progress "Compilando ZXProxy, isso pode levar alguns minutos..."
+    cargo build --release > /tmp/zxproxy_build.log 2>&1
+    
+    if [ $? -ne 0 ]; then
+        echo "❌ Erro na compilação:"
+        tail -n 30 /tmp/zxproxy_build.log
+        error_exit "Falha ao compilar ZXProxy"
+    fi
+
+    # Verificar se o binário foi criado
+    if [ -f ./target/release/zxproxy ]; then
+        cp ./target/release/zxproxy /opt/zxproxy/proxy
+    elif [ -f ./target/release/bsproxy ]; then
+        cp ./target/release/bsproxy /opt/zxproxy/proxy
     else
-        # Criar menu básico
-        cat > /opt/zxproxy/menu << 'EOF'
+        echo "❌ Binário não encontrado. Arquivos em target/release/:"
+        ls -la ./target/release/
+        error_exit "Binário não encontrado"
+    fi
+    
+    chmod +x /opt/zxproxy/proxy
+    
+    # Verificar se o binário funciona
+    /opt/zxproxy/proxy --help > /dev/null 2>&1
+    if [ $? -ne 0 ]; then
+        echo "❌ Binário não está funcionando corretamente"
+        error_exit "Teste do binário falhou"
+    fi
+    
+    increment_step
+
+    show_progress "Configurando permissões..."
+    chmod +x /opt/zxproxy/proxy
+
+    # Criar link
+    cp /opt/zxproxy/proxy /usr/local/bin/zxproxy
+    chmod +x /usr/local/bin/zxproxy
+    
+    increment_step
+
+    show_progress "Limpando diretórios temporários..."
+    cd /root/
+    rm -rf /root/ZXProxy/
+    increment_step
+
+    # Criar menu
+    cat > /opt/zxproxy/menu << 'EOF'
 #!/bin/bash
 ZXPROXY="/opt/zxproxy/proxy"
 PID_FILE="/tmp/zxproxy_"
+LOG_DIR="/tmp"
 
 show_menu() {
     clear
@@ -393,8 +432,9 @@ show_menu() {
     echo ""
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
-    echo " 3 - Status"
-    echo " 4 - Sair"
+    echo " 3 - Status do Proxy"
+    echo " 4 - Ver Logs"
+    echo " 5 - Sair"
     echo ""
     echo -n "--> Selecione uma opção: "
 }
@@ -406,20 +446,52 @@ open_port() {
         sleep 2
         return
     fi
+    
+    # Verificar se porta está em uso
+    if ss -tlnp | grep -q ":${PORT} "; then
+        echo "❌ Porta ${PORT} já está em uso!"
+        sleep 2
+        return
+    fi
+    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         echo "❌ Porta ${PORT} já está aberta!"
         sleep 2
         return
     fi
+    
     echo "🔓 Abrindo porta ${PORT}..."
-    nohup ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
-    echo $! > "${PID_FILE}${PORT}.pid"
-    sleep 2
-    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta!"
+    
+    # Verificar se o binário existe
+    if [ ! -f "$ZXPROXY" ]; then
+        echo "❌ ZXProxy não encontrado em $ZXPROXY"
+        sleep 3
+        return
+    fi
+    
+    # Verificar permissão para porta baixa
+    if [ "$PORT" -lt 1024 ]; then
+        echo "📌 Porta ${PORT} requer privilégios root"
+        nohup sudo ${ZXPROXY} -p ${PORT} > "${LOG_DIR}/zxproxy_${PORT}.log" 2>&1 &
     else
-        echo "❌ Falha!"
+        nohup ${ZXPROXY} -p ${PORT} > "${LOG_DIR}/zxproxy_${PORT}.log" 2>&1 &
+    fi
+    
+    echo $! > "${PID_FILE}${PORT}.pid"
+    sleep 3
+    
+    # Verificar se o processo está rodando
+    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
+        echo "✅ Porta ${PORT} aberta com sucesso!"
+        echo "📝 Log: ${LOG_DIR}/zxproxy_${PORT}.log"
+        echo "🔍 Verificar: ss -tlnp | grep ${PORT}"
+    else
+        echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
+        echo "📝 Verifique o log: ${LOG_DIR}/zxproxy_${PORT}.log"
+        echo ""
+        echo "Últimas linhas do log:"
+        tail -n 10 "${LOG_DIR}/zxproxy_${PORT}.log" 2>/dev/null || echo "Log não encontrado"
     fi
     sleep 2
 }
@@ -445,18 +517,47 @@ close_port() {
 show_status() {
     echo "📊 Status do ZXProxy:"
     echo "===================="
+    echo ""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
             PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
             PID=$(cat "$pidfile")
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
+                echo "   Log: ${LOG_DIR}/zxproxy_${PORT}.log"
+            else
+                echo "❌ Porta $PORT: processo morto"
+                rm -f "$pidfile"
             fi
         fi
     done
+    
+    echo ""
+    echo "🔍 Portas em uso:"
+    ss -tlnp | grep -E "LISTEN.*zxproxy" || echo "   Nenhuma porta ativa"
     echo ""
     read -p "Pressione Enter para continuar..."
 }
+
+show_logs() {
+    echo "📝 Logs do ZXProxy:"
+    echo "==================="
+    echo ""
+    ls -la /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log encontrado"
+    echo ""
+    read -p "Digite a porta para ver o log (ou Enter para sair): " PORT
+    if [ -n "$PORT" ] && [ -f "/tmp/zxproxy_${PORT}.log" ]; then
+        tail -n 50 "/tmp/zxproxy_${PORT}.log"
+        echo ""
+        read -p "Pressione Enter para continuar..."
+    fi
+}
+
+# Verificar se sudo está disponível para portas baixas
+if [ ! -f /etc/sudoers.d/zxproxy ]; then
+    echo "zxproxy ALL=(ALL) NOPASSWD: /opt/zxproxy/proxy" > /etc/sudoers.d/zxproxy 2>/dev/null
+    chmod 440 /etc/sudoers.d/zxproxy 2>/dev/null
+fi
 
 while true; do
     show_menu
@@ -465,53 +566,16 @@ while true; do
         1) open_port ;;
         2) close_port ;;
         3) show_status ;;
-        4) echo "👋 Saindo..."; exit 0 ;;
+        4) show_logs ;;
+        5) echo "👋 Saindo..."; exit 0 ;;
         *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
 EOF
-        chmod +x /opt/zxproxy/menu
-    fi
 
-    increment_step
-
-    show_progress "Compilando ZXProxy, isso pode levar alguns minutos..."
-    cargo build --release > /tmp/zxproxy_build.log 2>&1
-    
-    if [ $? -ne 0 ]; then
-        echo "❌ Erro na compilação:"
-        tail -n 30 /tmp/zxproxy_build.log
-        error_exit "Falha ao compilar ZXProxy"
-    fi
-
-    if [ -f ./target/release/zxproxy ]; then
-        mv ./target/release/zxproxy /opt/zxproxy/proxy || error_exit "Falha ao mover binário"
-        chmod +x /opt/zxproxy/proxy
-    elif [ -f ./target/release/bsproxy ]; then
-        mv ./target/release/bsproxy /opt/zxproxy/proxy || error_exit "Falha ao mover binário"
-        chmod +x /opt/zxproxy/proxy
-    else
-        error_exit "Binário 'zxproxy' não encontrado após compilação"
-    fi
-    increment_step
-
-    show_progress "Configurando permissões..."
-    chmod +x /opt/zxproxy/proxy
-    [ -f /opt/zxproxy/menu ] && chmod +x /opt/zxproxy/menu
-
-    # Criar link
-    if [ -f /opt/zxproxy/menu ]; then
-        cp /opt/zxproxy/menu /usr/local/bin/zxproxy
-    else
-        cp /opt/zxproxy/proxy /usr/local/bin/zxproxy
-    fi
+    chmod +x /opt/zxproxy/menu
+    cp /opt/zxproxy/menu /usr/local/bin/zxproxy
     chmod +x /usr/local/bin/zxproxy
-    increment_step
-
-    show_progress "Limpando diretórios temporários..."
-    cd /root/
-    rm -rf /root/ZXProxy/
-    increment_step
 
     echo ""
     echo -e "\033[0;32m✅ Instalação concluída com sucesso!\033[0m"
@@ -526,6 +590,7 @@ EOF
     echo "   - SECURITY (AUTH ou SECURITY)"
     echo "   - TCP Fallback (qualquer outro)"
     echo ""
-    echo "📝 Log: /tmp/zxproxy_*.log"
+    echo "📝 Logs: /tmp/zxproxy_*.log"
+    echo "🔍 Verificar porta: ss -tlnp | grep zxproxy"
     echo ""
 fi
