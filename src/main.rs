@@ -30,7 +30,7 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 VPN Mode: Read all data, then 200 OK + Keep-Alive");
+    info!("📡 HTTP Injector Mode: 200 OK + Real Keep-Alive");
 
     let listener = TcpListener::bind(&addr).await?;
     
@@ -38,52 +38,57 @@ async fn main() -> Result<()> {
         tokio::spawn(async move {
             let mut buffer = vec![0u8; 8192];
             
-            // LER TODOS OS DADOS PRIMEIRO
             match socket.read(&mut buffer).await {
                 Ok(n) if n > 0 => {
                     let request = String::from_utf8_lossy(&buffer[..n]);
                     let first_line = request.lines().next().unwrap_or("");
                     info!("📩 [{}] {}", peer_addr, first_line);
-                    info!("📩 [{}] Full request:\n{}", peer_addr, request);
                     
                     // Verificar se é WebSocket
                     let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
                                        request.to_lowercase().contains("sec-websocket-key");
                     
-                    // SÓ RESPONDER DEPOIS DE LER TUDO
-                    if is_websocket {
-                        let response = "HTTP/1.1 101 Switching Protocols\r\n\
-                                        Upgrade: websocket\r\n\
-                                        Connection: Upgrade\r\n\
-                                        Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
-                                        \r\n";
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 101 WebSocket", peer_addr);
+                    // Responder com 200 OK ou 101 Switching Protocols
+                    let response = if is_websocket {
+                        "HTTP/1.1 101 Switching Protocols\r\n\
+                         Upgrade: websocket\r\n\
+                         Connection: Upgrade\r\n\
+                         Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                         \r\n"
                     } else {
-                        // RESPOSTA 200 OK COM KEEP-ALIVE
-                        let response = "HTTP/1.1 200 OK\r\n\
-                                        Content-Type: text/plain\r\n\
-                                        Content-Length: 2\r\n\
-                                        Connection: keep-alive\r\n\
-                                        Server: ZXProxy\r\n\
-                                        \r\n\
-                                        OK";
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 200 OK sent", peer_addr);
-                    }
+                        "HTTP/1.1 200 OK\r\n\
+                         Content-Type: text/plain\r\n\
+                         Content-Length: 2\r\n\
+                         Connection: keep-alive\r\n\
+                         Server: ZXProxy\r\n\
+                         \r\n\
+                         OK"
+                    };
                     
-                    // MANTER CONEXÃO VIVA COM KEEP-ALIVE
-                    let mut interval = tokio::time::interval(Duration::from_secs(20));
+                    let _ = socket.write_all(response.as_bytes()).await;
+                    info!("✅ [{}] Response sent", peer_addr);
+                    
+                    // KEEP-ALIVE COM DADOS REAIS
+                    let mut counter = 0;
+                    let mut interval = tokio::time::interval(Duration::from_secs(15));
+                    
                     loop {
                         interval.tick().await;
-                        // Enviar keep-alive (apenas um espaço ou \r\n)
-                        match socket.write_all(b"\r\n").await {
-                            Ok(_) => info!("💓 [{}] Keep-alive", peer_addr),
+                        counter += 1;
+                        
+                        // Enviar keep-alive com dados reais
+                        let keep_alive = format!("\r\n\r\n");
+                        
+                        match socket.write_all(keep_alive.as_bytes()).await {
+                            Ok(_) => info!("💓 [{}] Keep-alive #{}", peer_addr, counter),
                             Err(_) => {
-                                info!("🔚 [{}] Connection closed by client", peer_addr);
+                                info!("🔚 [{}] Connection closed", peer_addr);
                                 break;
                             }
                         }
+                        
+                        // Pequeno delay para o app processar
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 }
                 Ok(_) => info!("📦 [{}] Empty request", peer_addr),
