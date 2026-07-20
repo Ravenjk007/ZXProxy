@@ -1,28 +1,83 @@
 #!/bin/bash
-# ZXProxy Installer - VPN HTTP Injector Optimized
+# ZXProxy Installer - com menu.sh original
+REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
+REPO_BRANCH="main"
+CMD_NAME="zxproxy"
+TOTAL_STEPS=9
+CURRENT_STEP=0
 
-echo "🚀 Instalando ZXProxy para HTTP Injector..."
+show_progress() {
+    PERCENT=$((CURRENT_STEP * 100 / TOTAL_STEPS))
+    echo "Progresso: [${PERCENT}%] - $1"
+}
 
-# Parar processos antigos
-sudo pkill -9 zxproxy 2>/dev/null
-sudo fuser -k 80/tcp 2>/dev/null
-sudo fuser -k 8080/tcp 2>/dev/null
-sudo rm -f /tmp/*proxy*.pid 2>/dev/null
+error_exit() {
+    echo -e "\n❌ Erro: $1"
+    exit 1
+}
 
-# Instalar Rust
-if ! command -v rustc &> /dev/null; then
-    curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
-    source "$HOME/.cargo/env"
-fi
+increment_step() {
+    CURRENT_STEP=$((CURRENT_STEP + 1))
+}
 
-# Criar projeto
-cd /root
-rm -rf ZXProxy
-cargo new ZXProxy
-cd ZXProxy
+if [ "$EUID" -ne 0 ]; then
+    error_exit "EXECUTE COMO ROOT"
+else
+    clear
+    show_progress "Atualizando repositorios..."
+    export DEBIAN_FRONTEND=noninteractive
+    apt update -y > /dev/null 2>&1 || error_exit "Falha ao atualizar os repositorios"
+    increment_step
 
-# Cargo.toml
-cat > Cargo.toml << 'EOF'
+    show_progress "Verificando o sistema..."
+    if ! command -v lsb_release &> /dev/null; then
+        apt install lsb-release -y > /dev/null 2>&1 || error_exit "Falha ao instalar lsb-release"
+    fi
+    increment_step
+
+    OS_NAME=$(lsb_release -is)
+    VERSION=$(lsb_release -rs)
+    case $OS_NAME in
+        Ubuntu)
+            case $VERSION in
+                24.*|22.*|20.*|18.*) show_progress "✅ Sistema Ubuntu suportado..." ;;
+                *) error_exit "Versão do Ubuntu não suportada." ;;
+            esac
+            ;;
+        Debian)
+            case $VERSION in
+                12*|11*|10*|9*) show_progress "✅ Sistema Debian suportado..." ;;
+                *) error_exit "Versão do Debian não suportada." ;;
+            esac
+            ;;
+        *) error_exit "Sistema não suportado." ;;
+    esac
+    increment_step
+
+    show_progress "Atualizando o sistema..."
+    apt upgrade -y > /dev/null 2>&1 || error_exit "Falha ao atualizar o sistema"
+    apt-get install curl build-essential git -y > /dev/null 2>&1 || error_exit "Falha ao instalar pacotes"
+    increment_step
+
+    show_progress "Criando diretorio /opt/zxproxy..."
+    mkdir -p /opt/zxproxy > /dev/null 2>&1
+    increment_step
+
+    show_progress "Instalando Rust..."
+    if ! command -v rustc &> /dev/null; then
+        curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y > /dev/null 2>&1 || error_exit "Falha ao instalar Rust"
+        source "$HOME/.cargo/env"
+    fi
+    increment_step
+
+    show_progress "Compilando ZXProxy (com Keep-Alive)..."
+    
+    cd /root
+    rm -rf ZXProxy
+    cargo new ZXProxy > /dev/null 2>&1 || error_exit "Falha ao criar projeto"
+    cd ZXProxy
+
+    cat > Cargo.toml << 'EOF'
 [package]
 name = "zxproxy"
 version = "0.1.0"
@@ -40,8 +95,7 @@ name = "zxproxy"
 path = "src/main.rs"
 EOF
 
-# main.rs
-cat > src/main.rs << 'EOF'
+    cat > src/main.rs << 'EOF'
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use clap::Parser;
@@ -51,7 +105,7 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
-#[command(about = "ZXProxy - HTTP Injector Optimized")]
+#[command(about = "ZXProxy - VPN/HTTP Inject Optimized")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "8080")]
     port: u16,
@@ -74,7 +128,7 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 HTTP Injector Mode: Read all, 200 OK, Keep-Alive");
+    info!("📡 VPN Mode: Read all, 200 OK, Keep-Alive Forever");
 
     let listener = TcpListener::bind(&addr).await?;
     
@@ -131,106 +185,194 @@ async fn main() -> Result<()> {
 }
 EOF
 
-# Compilar
-echo "🔨 Compilando..."
-cargo build --release 2>&1 | tail -20
-
-if [ -f target/release/zxproxy ]; then
-    sudo cp target/release/zxproxy /usr/local/bin/
-    sudo chmod +x /usr/local/bin/zxproxy
+    cargo build --release > /tmp/zxproxy_build.log 2>&1
     
-    # Menu
-    cat > /usr/local/bin/zxproxy-menu << 'EOF'
+    if [ $? -ne 0 ]; then
+        echo "❌ Erro na compilação:"
+        tail -n 30 /tmp/zxproxy_build.log
+        error_exit "Falha ao compilar"
+    fi
+
+    if [ -f ./target/release/zxproxy ]; then
+        mv ./target/release/zxproxy /opt/zxproxy/proxy
+        chmod +x /opt/zxproxy/proxy
+    else
+        error_exit "Binário não encontrado"
+    fi
+    increment_step
+
+    show_progress "Configurando menu.sh..."
+    
+    # Salvar o menu.sh diretamente
+    cat > /opt/zxproxy/menu.sh << 'EOF'
 #!/bin/bash
-while true; do
+ZXPROXY="/opt/zxproxy/proxy"
+PID_FILE="/tmp/zxproxy_"
+
+show_menu() {
     clear
     echo "====================================="
     echo "          ZXProxy Menu              "
     echo "====================================="
     echo ""
-    ps aux | grep "zxproxy -p" | grep -v grep | while read line; do
-        PORT=$(echo $line | grep -oP '(?<=-p )\d+')
-        PID=$(echo $line | awk '{print $2}')
-        echo "   ✅ Porta $PORT (PID: $PID)"
+    ACTIVE_PORTS=""
+    for pidfile in ${PID_FILE}*.pid; do
+        if [ -f "$pidfile" ]; then
+            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
+            if ps -p $(cat "$pidfile") > /dev/null 2>&1; then
+                ACTIVE_PORTS="$ACTIVE_PORTS $PORT"
+            else
+                rm -f "$pidfile"
+            fi
+        fi
+    done
+    if [ -n "$ACTIVE_PORTS" ]; then
+        echo "Porta(s) aberta(s):$ACTIVE_PORTS"
+    else
+        echo "Porta(s): nenhuma"
+    fi
+    echo ""
+    echo " 1 - Abrir Porta"
+    echo " 2 - Fechar Porta"
+    echo " 3 - Status do Proxy"
+    echo " 4 - Ver Logs"
+    echo " 5 - Sair"
+    echo ""
+    echo -n "--> Selecione uma opção: "
+}
+
+open_port() {
+    read -p "Digite o número da porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Porta inválida!"
+        sleep 2
+        return
+    fi
+    
+    sudo fuser -k $PORT/tcp 2>/dev/null
+    
+    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
+        rm -f "${PID_FILE}${PORT}.pid"
+    fi
+    
+    echo "🔓 Abrindo porta ${PORT}..."
+    if [ ! -f "$ZXPROXY" ]; then
+        echo "❌ ZXProxy não encontrado!"
+        sleep 3
+        return
+    fi
+    
+    if [ "$PORT" -lt 1024 ]; then
+        nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    else
+        nohup ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    fi
+    
+    echo $! > "${PID_FILE}${PORT}.pid"
+    sleep 3
+    
+    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
+        echo "✅ Porta ${PORT} aberta com Keep-Alive!"
+        echo "📝 Log: /tmp/zxproxy_${PORT}.log"
+    else
+        echo "❌ Falha ao abrir porta ${PORT}!"
+        rm -f "${PID_FILE}${PORT}.pid"
+        tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
+    fi
+    sleep 2
+}
+
+close_port() {
+    read -p "Digite o número da porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Porta inválida!"
+        sleep 2
+        return
+    fi
+    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
+        PID=$(cat "${PID_FILE}${PORT}.pid")
+        sudo kill -9 $PID 2>/dev/null
+        rm -f "${PID_FILE}${PORT}.pid"
+        echo "✅ Porta ${PORT} fechada!"
+    else
+        echo "❌ Porta ${PORT} não está aberta!"
+    fi
+    sleep 2
+}
+
+show_status() {
+    echo "📊 Status do ZXProxy:"
+    echo "===================="
+    echo ""
+    for pidfile in ${PID_FILE}*.pid; do
+        if [ -f "$pidfile" ]; then
+            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
+            PID=$(cat "$pidfile")
+            if ps -p $PID > /dev/null 2>&1; then
+                echo "✅ Porta $PORT: ativa (PID: $PID)"
+                echo "   Log: /tmp/zxproxy_${PORT}.log"
+            else
+                echo "❌ Porta $PORT: processo morto"
+                rm -f "$pidfile"
+            fi
+        fi
     done
     echo ""
-    echo " 1 - Iniciar porta 80 (HTTP Injector)"
-    echo " 2 - Iniciar porta 8080"
-    echo " 3 - Iniciar porta customizada"
-    echo " 4 - Parar todos"
-    echo " 5 - Status"
-    echo " 6 - Ver logs"
-    echo " 7 - Sair"
+    read -p "Pressione Enter para continuar..."
+}
+
+show_logs() {
+    echo "📝 Logs do ZXProxy:"
+    echo "==================="
     echo ""
-    read -p "--> " OPT
-    
-    case $OPT in
-        1)
-            sudo fuser -k 80/tcp 2>/dev/null
-            sudo pkill -9 zxproxy 2>/dev/null
-            sudo nohup zxproxy -p 80 > /tmp/zxproxy_80.log 2>&1 &
-            sleep 2
-            echo "✅ Porta 80 iniciada!"
-            read -p "Enter..."
-            ;;
-        2)
-            sudo fuser -k 8080/tcp 2>/dev/null
-            sudo pkill -9 zxproxy 2>/dev/null
-            sudo nohup zxproxy -p 8080 > /tmp/zxproxy_8080.log 2>&1 &
-            sleep 2
-            echo "✅ Porta 8080 iniciada!"
-            read -p "Enter..."
-            ;;
-        3)
-            read -p "Porta: " PORT
-            sudo fuser -k $PORT/tcp 2>/dev/null
-            sudo pkill -9 zxproxy 2>/dev/null
-            sudo nohup zxproxy -p $PORT > /tmp/zxproxy_${PORT}.log 2>&1 &
-            sleep 2
-            echo "✅ Porta $PORT iniciada!"
-            read -p "Enter..."
-            ;;
-        4)
-            sudo pkill -9 zxproxy
-            sudo rm -f /tmp/*proxy*.pid
-            echo "✅ Todos parados!"
-            sleep 2
-            ;;
-        5)
-            echo "📊 Status:"
-            ps aux | grep zxproxy | grep -v grep || echo "❌ Nenhum ativo"
-            echo ""
-            read -p "Enter..."
-            ;;
-        6)
-            echo "📝 Logs:"
-            tail -n 20 /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log"
-            echo ""
-            read -p "Enter..."
-            ;;
-        7)
-            echo "👋 Saindo..."
-            exit 0
-            ;;
+    ls -la /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log encontrado"
+    echo ""
+    read -p "Digite a porta para ver o log (ou Enter para sair): " PORT
+    if [ -n "$PORT" ] && [ -f "/tmp/zxproxy_${PORT}.log" ]; then
+        echo ""
+        tail -n 30 "/tmp/zxproxy_${PORT}.log"
+        echo ""
+        read -p "Pressione Enter para continuar..."
+    fi
+}
+
+while true; do
+    show_menu
+    read OPTION
+    case $OPTION in
+        1) open_port ;;
+        2) close_port ;;
+        3) show_status ;;
+        4) show_logs ;;
+        5) echo "👋 Saindo..."; exit 0 ;;
+        *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
 EOF
+
+    chmod +x /opt/zxproxy/menu.sh
     
-    sudo chmod +x /usr/local/bin/zxproxy-menu
-    
+    # Criar link
+    ln -sf /opt/zxproxy/menu.sh /usr/local/bin/"$CMD_NAME"
+    chmod +x /usr/local/bin/"$CMD_NAME"
+    increment_step
+
+    show_progress "Limpando diretórios temporários..."
+    cd /root/
+    rm -rf /root/ZXProxy/
+    increment_step
+
     echo ""
-    echo -e "\033[0;32m✅ Instalação concluída!\033[0m"
+    echo -e "\033[0;32m✅ Instalação concluída com sucesso!\033[0m"
     echo ""
-    echo "🚀 COMANDOS:"
-    echo "   zxproxy-menu    - Menu interativo"
-    echo "   sudo zxproxy -p 80 - Iniciar direto"
+    echo "🚀 Digite '$CMD_NAME' para acessar o menu."
+    echo "   Ou 'zxproxy -p 80' para abrir porta 80 diretamente."
     echo ""
-    echo "📱 CONFIGURE NO APP:"
-    echo "   Proxy: $(curl -s ifconfig.me):80"
-    echo "   Payload: Qualquer um, o proxy vai responder 200 OK"
+    echo "📡 Protocolos suportados:"
+    echo "   - HTTP (SEMPRE 200 OK + Keep-Alive)"
+    echo "   - WebSocket (101 Switching Protocols)"
+    echo "   - TCP Fallback"
     echo ""
-    echo "🔍 TESTE:"
-    echo "   curl -v -x http://localhost:80 https://google.com"
-else
-    echo "❌ Falha na compilação"
+    echo "💓 Keep-Alive ativo para VPN/HTTP Inject!"
+    echo ""
 fi
