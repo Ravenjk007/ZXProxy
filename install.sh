@@ -40,17 +40,17 @@ else
     case $OS_NAME in
         Ubuntu)
             case $VERSION in
-                24.*|22.*|20.*|18.*) show_progress "✅ Sistema Ubuntu suportado, continuando..." ;;
-                *) error_exit "Versão do Ubuntu não suportada. Use 18, 20, 22 ou 24." ;;
+                24.*|22.*|20.*|18.*) show_progress "✅ Sistema Ubuntu suportado..." ;;
+                *) error_exit "Versão do Ubuntu não suportada." ;;
             esac
             ;;
         Debian)
             case $VERSION in
-                12*|11*|10*|9*) show_progress "✅ Sistema Debian suportado, continuando..." ;;
-                *) error_exit "Versão do Debian não suportada. Use 9, 10, 11 ou 12." ;;
+                12*|11*|10*|9*) show_progress "✅ Sistema Debian suportado..." ;;
+                *) error_exit "Versão do Debian não suportada." ;;
             esac
             ;;
-        *) error_exit "Sistema não suportado. Use Ubuntu ou Debian." ;;
+        *) error_exit "Sistema não suportado." ;;
     esac
     increment_step
 
@@ -70,71 +70,49 @@ else
     fi
     increment_step
 
-    show_progress "Compilando ZXProxy, isso pode levar algum tempo..."
+    show_progress "Compilando ZXProxy..."
     if [ -d "/root/ZXProxy" ]; then
         rm -rf /root/ZXProxy
     fi
     
-    # Clonar o repositório
-    git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy > /dev/null 2>&1 || error_exit "Falha ao clonar ZXProxy"
+    git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy > /dev/null 2>&1 || error_exit "Falha ao clonar"
 
-    cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
-    cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar ZXProxy"
+    cd /root/ZXProxy || error_exit "Diretório não encontrado"
+    cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar"
 
-    # Verificar qual binário foi criado
     if [ -f ./target/release/zxproxy ]; then
-        mv ./target/release/zxproxy /opt/zxproxy/proxy || error_exit "Binário compilado não encontrado"
-        chmod +x /opt/zxproxy/proxy
-    elif [ -f ./target/release/bsproxy ]; then
-        mv ./target/release/bsproxy /opt/zxproxy/proxy || error_exit "Binário compilado não encontrado"
+        mv ./target/release/zxproxy /opt/zxproxy/proxy
         chmod +x /opt/zxproxy/proxy
     else
-        error_exit "Binário 'zxproxy' não encontrado após compilação"
+        error_exit "Binário não encontrado"
     fi
     increment_step
 
-    show_progress "Configurando menu..."
-    
-    # USAR O MENU.SH DO REPOSITÓRIO
+    show_progress "Copiando menu.sh do repositório..."
     if [ -f /root/ZXProxy/menu.sh ]; then
-        echo "📋 Copiando menu.sh do repositório..."
         cp /root/ZXProxy/menu.sh /opt/zxproxy/menu.sh
         chmod +x /opt/zxproxy/menu.sh
     else
-        echo "❌ menu.sh não encontrado no repositório!"
-        error_exit "menu.sh não encontrado"
+        error_exit "menu.sh não encontrado no repositório"
     fi
     increment_step
 
-    show_progress "Configurando permissões..."
-    chmod +x /opt/zxproxy/proxy
-    [ -f /opt/zxproxy/menu.sh ] && chmod +x /opt/zxproxy/menu.sh
-
-    # Criar o link usando cp (mais confiável)
-    if [ -f /opt/zxproxy/menu.sh ]; then
-        cp /opt/zxproxy/menu.sh /usr/local/bin/"$CMD_NAME"
-    else
-        cp /opt/zxproxy/proxy /usr/local/bin/"$CMD_NAME"
-    fi
+    show_progress "Criando link..."
+    cp /opt/zxproxy/menu.sh /usr/local/bin/"$CMD_NAME"
     chmod +x /usr/local/bin/"$CMD_NAME"
     increment_step
 
-    show_progress "Limpando diretórios temporários..."
+    show_progress "Limpando..."
     cd /root/
     rm -rf /root/ZXProxy/
     increment_step
 
     echo ""
-    echo -e "\033[0;32m✅ Instalação concluída com sucesso!\033[0m"
+    echo -e "\033[0;32m✅ Instalação concluída!\033[0m"
     echo ""
     echo "🚀 Digite '$CMD_NAME' para acessar o menu."
-    echo "   Ou '$CMD_NAME -p 80' para abrir porta 80 diretamente."
+    echo "   Ou '$CMD_NAME -p 80' para abrir porta 80."
     echo ""
-    echo "📡 Protocolos suportados:"
-    echo "   - SOCKS5 (byte 0x05)"
-    echo "   - TLS/SECURITY (byte 0x16)"
-    echo "   - WebSocket (GET / ou HTTP/)"
-    echo "   - SECURITY (AUTH ou SECURITY)"
-    echo "   - TCP Fallback (qualquer outro)"
+    echo "📡 Protocolos: SOCKS5 | TLS | WebSocket | SECURITY | TCP"
     echo ""
 fi
