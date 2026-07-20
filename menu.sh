@@ -1,6 +1,5 @@
 #!/bin/bash
-# menu.sh - ZXProxy Menu
-BSPROXY="/opt/zxproxy/proxy"
+ZXPROXY="/opt/zxproxy/proxy"
 PID_FILE="/tmp/zxproxy_"
 
 show_menu() {
@@ -29,7 +28,7 @@ show_menu() {
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
     echo " 3 - Status do Proxy"
-    echo " 4 - Ver Métricas (HTTP)" 
+    echo " 4 - Ver Métricas (HTTP)"
     echo " 5 - Sair"
     echo ""
     echo -n "--> Selecione uma opção: "
@@ -48,19 +47,21 @@ open_port() {
         return
     fi
     echo "🔓 Abrindo porta ${PORT}..."
-    if [ ! -f "$BSPROXY" ]; then
+    if [ ! -f "$ZXPROXY" ]; then
         echo "❌ ZXProxy não encontrado!"
         sleep 3
         return
     fi
-    nohup ${BSPROXY} -p ${PORT} -m > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    nohup ${ZXPROXY} -p ${PORT} -m > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta!"
+        echo "📝 Log: /tmp/zxproxy_${PORT}.log"
     else
-        echo "❌ Falha!"
+        echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
+        echo "📝 Verifique o log: /tmp/zxproxy_${PORT}.log"
     fi
     sleep 2
 }
@@ -94,6 +95,7 @@ show_status() {
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
                 echo "   Log: /tmp/zxproxy_${PORT}.log"
+                ACTIVE_PORTS="$ACTIVE_PORTS $PORT"
             fi
         fi
     done
@@ -108,7 +110,7 @@ show_metrics() {
     echo "📊 Métricas do ZXProxy:"
     echo "======================"
     if command -v curl &> /dev/null; then
-        curl -s http://localhost:9090/metrics | python3 -m json.tool 2>/dev/null || curl -s http://localhost:9090/metrics
+        curl -s http://localhost:9090/metrics 2>/dev/null | python3 -m json.tool 2>/dev/null || curl -s http://localhost:9090/metrics 2>/dev/null || echo "Servidor de métricas não está rodando"
     else
         echo "curl não instalado. Acesse: http://localhost:9090/metrics"
     fi
