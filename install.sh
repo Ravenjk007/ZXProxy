@@ -81,19 +81,19 @@ else
     cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar"
 
     if [ -f ./target/release/zxproxy ]; then
-        mv ./target/release/zxproxy /opt/zxproxy/proxy
+        cp ./target/release/zxproxy /opt/zxproxy/proxy
         chmod +x /opt/zxproxy/proxy
     else
         error_exit "Binário não encontrado"
     fi
     increment_step
 
-    show_progress "Copiando menu.sh do repositório..."
+    show_progress "Copiando menu.sh..."
     if [ -f /root/ZXProxy/menu.sh ]; then
         cp /root/ZXProxy/menu.sh /opt/zxproxy/menu.sh
         chmod +x /opt/zxproxy/menu.sh
     else
-        error_exit "menu.sh não encontrado no repositório"
+        error_exit "menu.sh não encontrado"
     fi
     increment_step
 
