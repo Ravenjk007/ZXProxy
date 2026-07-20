@@ -70,7 +70,7 @@ else
     fi
     increment_step
 
-    show_progress "Compilando ZXProxy (Keep-Alive Real)..."
+    show_progress "Compilando ZXProxy (Multiprotocol)..."
     
     cd /root
     rm -rf ZXProxy
@@ -105,7 +105,7 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
-#[command(about = "ZXProxy - VPN/HTTP Inject Optimized")]
+#[command(about = "ZXProxy - Multiprotocol VPN/HTTP Inject")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "8080")]
     port: u16,
@@ -128,68 +128,69 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 HTTP Injector Mode: 200 OK + Real Keep-Alive");
+    info!("📡 Multiprotocol Mode: SOCKS5, TLS, WebSocket, HTTP, SECURITY");
 
     let listener = TcpListener::bind(&addr).await?;
     
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
-            let mut buffer = vec![0u8; 8192];
+            let mut buffer = [0u8; 1024];
             
-            match socket.read(&mut buffer).await {
+            match socket.peek(&mut buffer).await {
                 Ok(n) if n > 0 => {
-                    let request = String::from_utf8_lossy(&buffer[..n]);
-                    let first_line = request.lines().next().unwrap_or("");
-                    info!("📩 [{}] {}", peer_addr, first_line);
+                    let protocol = detect_protocol(&buffer[..n]);
+                    info!("📡 [{}] Protocol: {}", peer_addr, protocol);
                     
-                    let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
-                                       request.to_lowercase().contains("sec-websocket-key");
-                    
-                    let response = if is_websocket {
-                        "HTTP/1.1 101 Switching Protocols\r\n\
-                         Upgrade: websocket\r\n\
-                         Connection: Upgrade\r\n\
-                         Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
-                         \r\n"
-                    } else {
-                        "HTTP/1.1 200 OK\r\n\
-                         Content-Type: text/plain\r\n\
-                         Content-Length: 2\r\n\
-                         Connection: keep-alive\r\n\
-                         Server: ZXProxy\r\n\
-                         \r\n\
-                         OK"
-                    };
-                    
+                    let response = "HTTP/1.1 200 OK\r\n\
+                                    Content-Type: text/plain\r\n\
+                                    Content-Length: 2\r\n\
+                                    Connection: keep-alive\r\n\
+                                    Server: ZXProxy\r\n\
+                                    \r\n\
+                                    OK";
                     let _ = socket.write_all(response.as_bytes()).await;
-                    info!("✅ [{}] Response sent", peer_addr);
+                    info!("✅ [{}] 200 OK sent", peer_addr);
                     
-                    let mut counter = 0;
                     let mut interval = tokio::time::interval(Duration::from_secs(15));
-                    
                     loop {
                         interval.tick().await;
-                        counter += 1;
-                        
-                        let keep_alive = format!("\r\n\r\n");
-                        
-                        match socket.write_all(keep_alive.as_bytes()).await {
-                            Ok(_) => info!("💓 [{}] Keep-alive #{}", peer_addr, counter),
-                            Err(_) => {
-                                info!("🔚 [{}] Connection closed", peer_addr);
-                                break;
-                            }
+                        if socket.write_all(b"\r\n").await.is_err() {
+                            info!("🔚 [{}] Connection closed", peer_addr);
+                            break;
                         }
-                        
-                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
                 }
-                Ok(_) => info!("📦 [{}] Empty request", peer_addr),
-                Err(e) => error!("❌ [{}] Read error: {}", peer_addr, e),
+                Ok(_) => info!("📦 [{}] Empty", peer_addr),
+                Err(e) => error!("❌ [{}] Error: {}", peer_addr, e),
             }
         });
     }
     Ok(())
+}
+
+fn detect_protocol(data: &[u8]) -> &'static str {
+    if data.is_empty() { return "UNKNOWN"; }
+    
+    if data.len() >= 1 && data[0] == 0x05 { return "SOCKS5"; }
+    if data.len() >= 3 && data[0] == 0x16 { return "TLS"; }
+    
+    if let Ok(text) = std::str::from_utf8(data) {
+        let text_lower = text.to_lowercase();
+        if text_lower.contains("upgrade: websocket") || text_lower.contains("sec-websocket-key") {
+            return "WEBSOCKET";
+        }
+        if text.starts_with("GET ") || text.starts_with("POST ") || 
+           text.starts_with("PUT ") || text.starts_with("DELETE ") || 
+           text.starts_with("CONNECT ") || text.starts_with("HEAD ") ||
+           text.starts_with("OPTIONS ") || text.starts_with("PATCH ") ||
+           text.contains("HTTP/") {
+            return "HTTP";
+        }
+        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
+            return "SECURITY";
+        }
+    }
+    "TCP"
 }
 EOF
 
@@ -211,7 +212,12 @@ EOF
 
     show_progress "Configurando menu..."
     
-    cat > /opt/zxproxy/menu << 'EOF'
+    # Baixar menu.sh do GitHub
+    curl -s -o /opt/zxproxy/menu.sh "https://raw.githubusercontent.com/Ravenjk007/ZXProxy/main/menu.sh"
+    
+    if [ ! -f /opt/zxproxy/menu.sh ]; then
+        # Menu de fallback
+        cat > /opt/zxproxy/menu.sh << 'EOF'
 #!/bin/bash
 ZXPROXY="/opt/zxproxy/proxy"
 PID_FILE="/tmp/zxproxy_"
@@ -260,23 +266,18 @@ open_port() {
         rm -f "${PID_FILE}${PORT}.pid"
     fi
     echo "🔓 Abrindo porta ${PORT}..."
-    
     if [ "$PORT" -lt 1024 ]; then
         nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     else
         nohup ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     fi
-    
     echo $! > "${PID_FILE}${PORT}.pid"
-    sleep 3
-    
+    sleep 2
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta!"
-        echo "📝 Log: /tmp/zxproxy_${PORT}.log"
     else
         echo "❌ Falha!"
         rm -f "${PID_FILE}${PORT}.pid"
-        tail -n 5 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
     fi
     sleep 2
 }
@@ -329,9 +330,10 @@ while true; do
     esac
 done
 EOF
+    fi
 
-    chmod +x /opt/zxproxy/menu
-    ln -sf /opt/zxproxy/menu /usr/local/bin/"$CMD_NAME"
+    chmod +x /opt/zxproxy/menu.sh
+    ln -sf /opt/zxproxy/menu.sh /usr/local/bin/"$CMD_NAME"
     chmod +x /usr/local/bin/"$CMD_NAME"
     increment_step
 
@@ -346,7 +348,14 @@ EOF
     echo "🚀 Digite '$CMD_NAME' para acessar o menu."
     echo "   Ou 'zxproxy -p 80' para abrir porta 80 diretamente."
     echo ""
-    echo "💓 Keep-Alive Real ativo!"
-    echo "   O proxy envia dados a cada 15 segundos"
+    echo "📡 Protocolos suportados:"
+    echo "   - SOCKS5 (byte 0x05)"
+    echo "   - TLS/SSL (byte 0x16)"
+    echo "   - WebSocket (Upgrade: websocket)"
+    echo "   - HTTP (GET, POST, PUT, DELETE, etc)"
+    echo "   - SECURITY (AUTH ou SECURITY)"
+    echo "   - TCP Fallback"
+    echo ""
+    echo "💓 Keep-Alive ativo para VPN/HTTP Inject!"
     echo ""
 fi
