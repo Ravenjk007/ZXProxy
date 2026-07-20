@@ -1,15 +1,19 @@
 use tokio::net::TcpListener;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::AsyncReadExt;
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
-use std::time::Duration;
-use sha1::{Sha1, Digest};
-use base64::Engine;
+
+mod socks5;
+mod tls;
+mod websocket;
+mod tcp_fallback;
+mod security;
+mod http;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
-#[command(about = "ZXProxy - VPN/HTTP Inject Optimized")]
+#[command(about = "ZXProxy - Multiprotocol VPN/HTTP Inject")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "8080")]
     port: u16,
@@ -32,122 +36,70 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 HTTP Injector Mode: Real WebSocket + Keep-Alive");
+    info!("📡 Protocols: SOCKS5, TLS, WebSocket, HTTP, SECURITY, TCP");
+    info!("💡 Multiprotocol Mode: Auto-detect and handle");
 
     let listener = TcpListener::bind(&addr).await?;
     
-    while let Ok((mut socket, peer_addr)) = listener.accept().await {
+    while let Ok((socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
-            let mut buffer = vec![0u8; 8192];
+            let mut buf = [0u8; 1024];
             
-            match socket.read(&mut buffer).await {
+            match socket.peek(&mut buf).await {
                 Ok(n) if n > 0 => {
-                    let request = String::from_utf8_lossy(&buffer[..n]);
-                    let first_line = request.lines().next().unwrap_or("");
-                    info!("📩 [{}] {}", peer_addr, first_line);
+                    let protocol = detect_protocol(&buf[..n]);
+                    info!("📡 [{}] Protocol: {}", peer_addr, protocol);
                     
-                    let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
-                                       request.to_lowercase().contains("sec-websocket-key");
+                    let result = match protocol {
+                        "SOCKS5" => socks5::handle_socks5(socket).await,
+                        "TLS" => tls::handle_tls(socket).await,
+                        "WEBSOCKET" => websocket::handle_websocket(socket).await,
+                        "HTTP" => http::handle_http(socket).await,
+                        "SECURITY" => security::handle_security(socket).await,
+                        _ => tcp_fallback::handle_tcp(socket).await,
+                    };
                     
-                    if is_websocket {
-                        info!("🌐 [{}] WebSocket request", peer_addr);
-                        
-                        // Extrair WebSocket Key corretamente
-                        let ws_key = extract_websocket_key(&request);
-                        let accept_key = generate_websocket_accept(&ws_key);
-                        
-                        let response = format!(
-                            "HTTP/1.1 101 Switching Protocols\r\n\
-                             Upgrade: websocket\r\n\
-                             Connection: Upgrade\r\n\
-                             Sec-WebSocket-Accept: {}\r\n\
-                             \r\n",
-                            accept_key
-                        );
-                        
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 101 Switching Protocols", peer_addr);
-                        
-                        // Manter WebSocket vivo com pings
-                        let mut counter = 0;
-                        let mut interval = tokio::time::interval(Duration::from_secs(10));
-                        
-                        loop {
-                            interval.tick().await;
-                            counter += 1;
-                            
-                            // WebSocket ping frame
-                            let ping_frame = [0x89, 0x00];
-                            
-                            match socket.write_all(&ping_frame).await {
-                                Ok(_) => info!("💓 [{}] WebSocket ping #{}", peer_addr, counter),
-                                Err(_) => {
-                                    info!("🔚 [{}] Connection closed", peer_addr);
-                                    break;
-                                }
-                            }
-                            
-                            // Tentar ler pong
-                            let mut pong_buf = [0u8; 2];
-                            let _ = socket.read(&mut pong_buf).await;
-                        }
-                    } else {
-                        // HTTP normal
-                        let response = "HTTP/1.1 200 OK\r\n\
-                                        Content-Type: text/plain\r\n\
-                                        Content-Length: 2\r\n\
-                                        Connection: keep-alive\r\n\
-                                        Server: ZXProxy\r\n\
-                                        \r\n\
-                                        OK";
-                        
-                        let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 200 OK sent", peer_addr);
-                        
-                        let mut counter = 0;
-                        let mut interval = tokio::time::interval(Duration::from_secs(15));
-                        
-                        loop {
-                            interval.tick().await;
-                            counter += 1;
-                            
-                            match socket.write_all(b"\r\n\r\n").await {
-                                Ok(_) => info!("💓 [{}] Keep-alive #{}", peer_addr, counter),
-                                Err(_) => {
-                                    info!("🔚 [{}] Connection closed", peer_addr);
-                                    break;
-                                }
-                            }
-                        }
+                    if let Err(e) = result {
+                        error!("❌ [{}] Error: {}", peer_addr, e);
                     }
                 }
-                Ok(_) => info!("📦 [{}] Empty", peer_addr),
-                Err(e) => error!("❌ [{}] Error: {}", peer_addr, e),
+                Ok(_) => info!("📦 [{}] Connection closed", peer_addr),
+                Err(e) => error!("❌ [{}] Peek error: {}", peer_addr, e),
             }
         });
     }
     Ok(())
 }
 
-fn extract_websocket_key(request: &str) -> String {
-    for line in request.lines() {
-        let line_lower = line.to_lowercase();
-        if line_lower.contains("sec-websocket-key") {
-            if let Some((_, value)) = line.split_once(':') {
-                return value.trim().to_string();
-            }
+fn detect_protocol(data: &[u8]) -> &'static str {
+    if data.is_empty() { return "UNKNOWN"; }
+    
+    // HTTP/WebSocket
+    if let Ok(text) = std::str::from_utf8(data) {
+        let text_lower = text.to_lowercase();
+        
+        if text_lower.contains("upgrade: websocket") || text_lower.contains("sec-websocket-key") {
+            return "WEBSOCKET";
+        }
+        
+        if text.starts_with("GET ") || text.starts_with("POST ") || 
+           text.starts_with("PUT ") || text.starts_with("DELETE ") || 
+           text.starts_with("CONNECT ") || text.starts_with("HEAD ") ||
+           text.starts_with("OPTIONS ") || text.starts_with("PATCH ") ||
+           text.contains("HTTP/") {
+            return "HTTP";
+        }
+        
+        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
+            return "SECURITY";
         }
     }
-    "dGhlIHNhbXBsZSBub25jZQ==".to_string()
-}
-
-fn generate_websocket_accept(key: &str) -> String {
-    let guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
-    let combined = format!("{}{}", key, guid);
     
-    let mut hasher = Sha1::new();
-    hasher.update(combined.as_bytes());
-    let result = hasher.finalize();
+    // SOCKS5
+    if data.len() >= 1 && data[0] == 0x05 { return "SOCKS5"; }
     
-    base64::engine::general_purpose::STANDARD.encode(result)
+    // TLS
+    if data.len() >= 3 && data[0] == 0x16 { return "TLS"; }
+    
+    "TCP"
 }
