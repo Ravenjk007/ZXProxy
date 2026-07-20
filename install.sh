@@ -1,6 +1,6 @@
 #!/bin/bash
-# install.sh - ZXProxy Installer
-REPO_URL="https://github.com/Ravenjk007/BSProxy.git"
+# ZXProxy Installer
+REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
 TOTAL_STEPS=9
@@ -74,21 +74,70 @@ else
     if [ -d "/root/ZXProxy" ]; then
         rm -rf /root/ZXProxy
     fi
+    
+    # Clonar o repositório
     git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy > /dev/null 2>&1 || error_exit "Falha ao clonar ZXProxy"
-
+    
+    # Copiar menu.sh se existir
     if [ -f /root/ZXProxy/menu.sh ]; then
         cp /root/ZXProxy/menu.sh /opt/zxproxy/menu
         chmod +x /opt/zxproxy/menu
     fi
-
+    
+    # Atualizar Cargo.toml para mudar o nome do binário
+    if [ -f /root/ZXProxy/Cargo.toml ]; then
+        sed -i 's/name = "bsproxy"/name = "zxproxy"/g' /root/ZXProxy/Cargo.toml
+        sed -i 's/name = "zkproxy"/name = "zxproxy"/g' /root/ZXProxy/Cargo.toml
+    fi
+    
+    # Renomear o diretório src se necessário e atualizar referências
+    if [ -d /root/ZXProxy/src ]; then
+        # Atualizar referências no main.rs
+        if [ -f /root/ZXProxy/src/main.rs ]; then
+            sed -i 's/bsproxy/zxproxy/g' /root/ZXProxy/src/main.rs
+            sed -i 's/BSProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
+            sed -i 's/zkproxy/zxproxy/g' /root/ZXProxy/src/main.rs
+            sed -i 's/ZKProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
+        fi
+        
+        # Atualizar referências em todos os arquivos .rs
+        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/bsproxy/zxproxy/g' {} \;
+        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/BSProxy/ZXProxy/g' {} \;
+        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/zkproxy/zxproxy/g' {} \;
+        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/ZKProxy/ZXProxy/g' {} \;
+    fi
+    
     cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
-    cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar ZXProxy"
-
+    
+    # Compilar
+    echo "Compilando... (isso pode levar alguns minutos)"
+    cargo build --release --jobs "$(nproc)" > /tmp/zxproxy_build.log 2>&1
+    
+    # Verificar se a compilação foi bem sucedida
+    if [ $? -ne 0 ]; then
+        echo "❌ Erro na compilação. Log:"
+        tail -n 50 /tmp/zxproxy_build.log
+        error_exit "Falha ao compilar ZXProxy"
+    fi
+    
+    # Procurar o binário (pode ser zxproxy, bsproxy ou zkproxy)
+    BINARY_FOUND=""
     if [ -f ./target/release/zxproxy ]; then
-        mv ./target/release/zxproxy /opt/zxproxy/proxy || error_exit "Binário compilado não encontrado"
+        BINARY_FOUND="./target/release/zxproxy"
+    elif [ -f ./target/release/bsproxy ]; then
+        BINARY_FOUND="./target/release/bsproxy"
+    elif [ -f ./target/release/zkproxy ]; then
+        BINARY_FOUND="./target/release/zkproxy"
+    fi
+    
+    if [ -n "$BINARY_FOUND" ]; then
+        mv "$BINARY_FOUND" /opt/zxproxy/proxy || error_exit "Falha ao mover o binário"
         chmod +x /opt/zxproxy/proxy
+        echo "✅ Binário movido com sucesso: $BINARY_FOUND"
     else
-        error_exit "Binário 'zxproxy' não encontrado após compilação"
+        echo "❌ Binário não encontrado. Arquivos em ./target/release/:"
+        ls -la ./target/release/ | head -n 20
+        error_exit "Binário não encontrado após compilação"
     fi
     increment_step
 
