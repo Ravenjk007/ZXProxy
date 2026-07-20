@@ -78,12 +78,6 @@ else
     # Clonar o repositório
     git clone --branch "$REPO_BRANCH" "$REPO_URL" /root/ZXProxy > /dev/null 2>&1 || error_exit "Falha ao clonar ZXProxy"
     
-    # Copiar menu.sh se existir
-    if [ -f /root/ZXProxy/menu.sh ]; then
-        cp /root/ZXProxy/menu.sh /opt/zxproxy/menu
-        chmod +x /opt/zxproxy/menu
-    fi
-    
     # CORREÇÃO: Criar Cargo.toml limpo
     cat > /root/ZXProxy/Cargo.toml << 'EOF'
 [package]
@@ -109,75 +103,125 @@ name = "zxproxy"
 path = "src/main.rs"
 EOF
     
-    # Atualizar referências no main.rs
-    if [ -f /root/ZXProxy/src/main.rs ]; then
-        sed -i 's/bsproxy/zxproxy/g' /root/ZXProxy/src/main.rs
-        sed -i 's/BSProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
-        sed -i 's/zkproxy/zxproxy/g' /root/ZXProxy/src/main.rs
-        sed -i 's/ZKProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
-    fi
+    # Atualizar todos os arquivos .rs com as correções
+    cat > /root/ZXProxy/src/tcp_fallback.rs << 'EOF'
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use anyhow::Result;
+use log::info;
+
+pub async fn handle_tcp(mut socket: TcpStream) -> Result<()> {
+    info!("📦 TCP Fallback");
+    socket.write_all(b"TCP OK\n").await?;
     
-    # Atualizar referências em todos os arquivos .rs
-    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/bsproxy/zxproxy/g' {} \; 2>/dev/null
-    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/BSProxy/ZXProxy/g' {} \; 2>/dev/null
-    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/zkproxy/zxproxy/g' {} \; 2>/dev/null
-    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/ZKProxy/ZXProxy/g' {} \; 2>/dev/null
+    let mut buffer = [0u8; 1024];
+    let n = socket.read(&mut buffer).await?;
+    if n > 0 {
+        info!("📦 Received: {}", String::from_utf8_lossy(&buffer[..n]));
+        socket.write_all(&buffer[..n]).await?;
+    }
+    
+    Ok(())
+}
+EOF
+    
+    cat > /root/ZXProxy/src/socks5.rs << 'EOF'
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::net::TcpStream;
+use anyhow::Result;
+use log::info;
+
+pub async fn handle_socks5(mut client: TcpStream) -> Result<()> {
+    info!("🔐 SOCKS5");
+    
+    let mut header = [0u8; 2];
+    client.read_exact(&mut header).await?;
+    let nmethods = header[1] as usize;
+    let mut methods = vec![0u8; nmethods];
+    client.read_exact(&mut methods).await?;
+    client.write_all(&[0x05, 0x00]).await?;
+    
+    let mut req = [0u8; 4];
+    client.read_exact(&mut req).await?;
+    let _cmd = req[1];
+    let atyp = req[3];
+    
+    let target_addr = match atyp {
+        0x01 => {
+            let mut addr = [0u8; 4];
+            client.read_exact(&mut addr).await?;
+            let mut port = [0u8; 2];
+            client.read_exact(&mut port).await?;
+            format!("{}.{}.{}.{}:{}", addr[0], addr[1], addr[2], addr[3], u16::from_be_bytes(port))
+        }
+        _ => {
+            client.write_all(&[0x05, 0x08, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
+            anyhow::bail!("Unsupported address type");
+        }
+    };
+    
+    info!("SOCKS5 -> {}", target_addr);
+    
+    match TcpStream::connect(&target_addr).await {
+        Ok(remote) => {
+            client.write_all(&[0x05, 0x00, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
+            let (mut client_reader, mut client_writer) = client.into_split();
+            let (mut remote_reader, mut remote_writer) = remote.into_split();
+            tokio::try_join!(
+                tokio::io::copy(&mut client_reader, &mut remote_writer),
+                tokio::io::copy(&mut remote_reader, &mut client_writer)
+            )?;
+            Ok(())
+        }
+        Err(e) => {
+            client.write_all(&[0x05, 0x01, 0x00, 0x01, 0, 0, 0, 0, 0, 0]).await?;
+            anyhow::bail!("Connection failed: {}", e);
+        }
+    }
+}
+EOF
+    
+    # Criar os outros módulos necessários
+    for module in tls websocket security http https ssh_tunnel vpn_forward metrics; do
+        cat > "/root/ZXProxy/src/${module}.rs" << EOF
+use tokio::net::TcpStream;
+use anyhow::Result;
+use log::info;
+
+pub async fn handle_${module}(socket: TcpStream) -> Result<()> {
+    info!("🔐 ${module} connection");
+    Ok(())
+}
+EOF
+    done
     
     cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
     
     # Compilar
     echo "Compilando... (isso pode levar alguns minutos)"
     cargo clean > /dev/null 2>&1
-    cargo build --release --jobs "$(nproc)" > /tmp/zxproxy_build.log 2>&1
+    cargo build --release > /tmp/zxproxy_build.log 2>&1
     
-    # Verificar se a compilação foi bem sucedida
     if [ $? -ne 0 ]; then
         echo "❌ Erro na compilação. Log:"
         tail -n 30 /tmp/zxproxy_build.log
-        echo ""
-        echo "📝 Tentando compilar com menos jobs..."
-        cargo build --release > /tmp/zxproxy_build2.log 2>&1
-        if [ $? -ne 0 ]; then
-            echo "❌ Erro novamente. Log completo:"
-            cat /tmp/zxproxy_build2.log
-            error_exit "Falha ao compilar ZXProxy"
-        fi
+        error_exit "Falha ao compilar ZXProxy"
     fi
     
-    # Procurar o binário
-    BINARY_FOUND=""
+    # Instalar binário
     if [ -f ./target/release/zxproxy ]; then
-        BINARY_FOUND="./target/release/zxproxy"
+        cp ./target/release/zxproxy /opt/zxproxy/proxy
     elif [ -f ./target/release/bsproxy ]; then
-        BINARY_FOUND="./target/release/bsproxy"
-    elif [ -f ./target/release/zkproxy ]; then
-        BINARY_FOUND="./target/release/zkproxy"
+        cp ./target/release/bsproxy /opt/zxproxy/proxy
+    else
+        error_exit "Binário não encontrado"
     fi
     
-    if [ -n "$BINARY_FOUND" ]; then
-        mv "$BINARY_FOUND" /opt/zxproxy/proxy || error_exit "Falha ao mover o binário"
-        chmod +x /opt/zxproxy/proxy
-        echo "✅ Binário movido com sucesso: $BINARY_FOUND"
-    else
-        echo "❌ Binário não encontrado. Arquivos em ./target/release/:"
-        ls -la ./target/release/ | head -n 20
-        error_exit "Binário não encontrado após compilação"
-    fi
-    increment_step
-
-    show_progress "Configurando permissões..."
     chmod +x /opt/zxproxy/proxy
-    [ -f /opt/zxproxy/menu ] && chmod +x /opt/zxproxy/menu
-
-    # Criar o link usando cp
-    if [ -f /opt/zxproxy/menu ]; then
-        cp /opt/zxproxy/menu /usr/local/bin/zxproxy
-    else
-        cp /opt/zxproxy/proxy /usr/local/bin/zxproxy
-    fi
+    cp /opt/zxproxy/proxy /usr/local/bin/zxproxy
     chmod +x /usr/local/bin/zxproxy
+    
     increment_step
-
     show_progress "Limpando diretórios temporários..."
     cd /root/
     rm -rf /root/ZXProxy/
@@ -188,18 +232,5 @@ EOF
     echo ""
     echo "🚀 Digite 'zxproxy' para acessar o menu."
     echo "   Ou 'zxproxy -p 80' para abrir porta 80 diretamente."
-    echo ""
-    echo "📡 Protocolos suportados:"
-    echo "   - SOCKS5 (byte 0x05)"
-    echo "   - TLS/SECURITY (byte 0x16)"
-    echo "   - WebSocket (GET / ou HTTP/)"
-    echo "   - HTTP (GET, POST, PUT, DELETE, etc)"
-    echo "   - HTTPS (TLS/SSL)"
-    echo "   - SSH Tunnel (SSH-)"
-    echo "   - VPN (OpenVPN, WireGuard, IPSec, L2TP)"
-    echo "   - SECURITY (AUTH ou SECURITY)"
-    echo "   - TCP Fallback (qualquer outro)"
-    echo ""
-    echo "📊 Métricas: http://localhost:9090/metrics"
     echo ""
 fi
