@@ -8,80 +8,192 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
+# Criar diretório se não existir
+mkdir -p /opt/zxproxy
+
 # Configurações padrão
-DEFAULT_PORT="80"
-DEFAULT_PROTOCOL="all"
+cat > /opt/zxproxy/config.conf << 'EOF'
+PORT=80
+PROTOCOL=all
+WEBSOCKET=active
+SECURITY=active
+SOCKS5=active
+TLS=active
+MULTIPROTOCOL=active
+MULTISTATUS=active
+EOF
+
+# Função para carregar configurações
+load_config() {
+    if [ -f "$CONFIG_FILE" ]; then
+        source "$CONFIG_FILE"
+    fi
+}
+
+# Função para salvar configurações
+save_config() {
+    cat > "$CONFIG_FILE" << EOF
+PORT=$PORT
+PROTOCOL=$PROTOCOL
+WEBSOCKET=$WEBSOCKET
+SECURITY=$SECURITY
+SOCKS5=$SOCKS5
+TLS=$TLS
+MULTIPROTOCOL=$MULTIPROTOCOL
+MULTISTATUS=$MULTISTATUS
+EOF
+}
+
+load_config
 
 show_header() {
     clear
-    echo -e "${BLUE}=========================================${NC}"
-    echo -e "${BLUE}           ZXProxy MENU                 ${NC}"
-    echo -e "${BLUE}=========================================${NC}"
+    echo -e "${BLUE}╔═══════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║           ZXProxy - SMALI VPS           ║${NC}"
+    echo -e "${BLUE}╚═══════════════════════════════════════════╝${NC}"
     echo ""
 }
 
-show_menu() {
+show_menu_principal() {
     show_header
-    
-    # Mostrar portas ativas
-    echo -e "${YELLOW}📡 PORTAS ATIVAS:${NC}"
-    ACTIVE_PORTS=""
-    for pidfile in ${PID_FILE}*.pid; do
-        if [ -f "$pidfile" ]; then
-            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
-            if ps -p $(cat "$pidfile") > /dev/null 2>&1; then
-                ACTIVE_PORTS="$ACTIVE_PORTS $PORT"
-                echo -e "   ${GREEN}✅ Porta $PORT (ativa)${NC}"
-            else
-                rm -f "$pidfile"
-            fi
-        fi
-    done
-    if [ -z "$ACTIVE_PORTS" ]; then
-        echo -e "   ${RED}❌ Nenhuma porta ativa${NC}"
-    fi
+    echo -e "${YELLOW}📡 WEBSOCKET SECURITY${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
     echo ""
-    
-    echo -e "${YELLOW}📋 OPÇÕES:${NC}"
-    echo "  [01] • ABRIR PORTA"
-    echo "  [02] • FECHAR PORTA"
-    echo "  [03] • MULTIPROTOCOLO"
-    echo "  [04] • MULTISTATUS"
-    echo "  [05] • WEBSOCKET SECURITY"
-    echo "  [06] • SOCKS5"
-    echo "  [07] • TLS/SSL"
-    echo "  [08] • STATUS DO PROXY"
-    echo "  [09] • VER LOGS"
-    echo "  [10] • SAIR"
+    echo -e "${GREEN}PORTA(S): ${PORT:-80}${NC}"
     echo ""
-    echo -n "INFORME UMA OPCAO: "
+    echo -e "${CYAN}[01] • ABRIR PORTA${NC}"
+    echo -e "${CYAN}[02] • ALTERAR STATUS${NC}"
+    echo -e "${CYAN}[03] • MULTIPROTOCOLO${NC}"
+    echo -e "${CYAN}[04] • MULTISTATUS${NC}"
+    echo -e "${CYAN}[05] • PARAR WEBSOCKET SECURITY${NC}"
+    echo -e "${CYAN}[06] • RETORNAR AO MENU${NC}"
+    echo ""
+    echo -n -e "${YELLOW}INFORME UMA OPCAO: ${NC}"
 }
 
-# Função para abrir porta com protocolo específico
-open_port() {
+show_multiprotocol() {
+    while true; do
+        show_header
+        echo -e "${YELLOW}📡 MULTIPROTOCOLO${NC}"
+        echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+        echo ""
+        echo -e "${GREEN}Status atual:${NC}"
+        echo -e "  ${CYAN}WebSocket: ${WEBSOCKET:-active}${NC}"
+        echo -e "  ${CYAN}SECURITY: ${SECURITY:-active}${NC}"
+        echo -e "  ${CYAN}SOCKS5: ${SOCKS5:-active}${NC}"
+        echo -e "  ${CYAN}TLS/SSL: ${TLS:-active}${NC}"
+        echo ""
+        echo -e "${CYAN}[01] • ATIVAR WEBSOCKET${NC}"
+        echo -e "${CYAN}[02] • DESATIVAR WEBSOCKET${NC}"
+        echo -e "${CYAN}[03] • ATIVAR SECURITY${NC}"
+        echo -e "${CYAN}[04] • DESATIVAR SECURITY${NC}"
+        echo -e "${CYAN}[05] • ATIVAR SOCKS5${NC}"
+        echo -e "${CYAN}[06] • DESATIVAR SOCKS5${NC}"
+        echo -e "${CYAN}[07] • VOLTAR${NC}"
+        echo ""
+        echo -n -e "${YELLOW}INFORME UMA OPCAO: ${NC}"
+        read OPT
+        
+        case $OPT in
+            01|1) WEBSOCKET="active"; save_config; echo -e "${GREEN}✅ WebSocket ativado!${NC}"; sleep 2 ;;
+            02|2) WEBSOCKET="inactive"; save_config; echo -e "${RED}❌ WebSocket desativado!${NC}"; sleep 2 ;;
+            03|3) SECURITY="active"; save_config; echo -e "${GREEN}✅ SECURITY ativado!${NC}"; sleep 2 ;;
+            04|4) SECURITY="inactive"; save_config; echo -e "${RED}❌ SECURITY desativado!${NC}"; sleep 2 ;;
+            05|5) SOCKS5="active"; save_config; echo -e "${GREEN}✅ SOCKS5 ativado!${NC}"; sleep 2 ;;
+            06|6) SOCKS5="inactive"; save_config; echo -e "${RED}❌ SOCKS5 desativado!${NC}"; sleep 2 ;;
+            07|7) return ;;
+            *) echo -e "${RED}❌ Opção inválida!${NC}"; sleep 2 ;;
+        esac
+    done
+}
+
+show_multistatus() {
+    show_header
+    echo -e "${YELLOW}📊 MULTISTATUS${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+    echo ""
+    
+    # Status do Proxy
+    echo -e "${GREEN}Status do Proxy:${NC}"
+    if pgrep -f "zxproxy.*-p" > /dev/null; then
+        echo -e "  ${GREEN}✅ ATIVO${NC}"
+        echo ""
+        echo -e "${GREEN}Portas ativas:${NC}"
+        for pidfile in ${PID_FILE}*.pid; do
+            if [ -f "$pidfile" ]; then
+                PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
+                PID=$(cat "$pidfile")
+                if ps -p $PID > /dev/null 2>&1; then
+                    echo -e "  ${CYAN}✅ Porta $PORT (PID: $PID)${NC}"
+                    echo -e "     ${GREEN}WebSocket: ${WEBSOCKET:-active}${NC}"
+                    echo -e "     ${GREEN}SECURITY: ${SECURITY:-active}${NC}"
+                    echo -e "     ${GREEN}SOCKS5: ${SOCKS5:-active}${NC}"
+                    echo -e "     ${GREEN}TLS: ${TLS:-active}${NC}"
+                    echo ""
+                fi
+            fi
+        done
+    else
+        echo -e "  ${RED}❌ INATIVO${NC}"
+    fi
+    
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+    echo ""
+    read -p "Pressione Enter para continuar..."
+}
+
+abrir_porta() {
+    show_header
+    echo -e "${YELLOW}🔓 ABRIR PORTA${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+    echo ""
+    
     read -p "Digite o número da porta: " PORT
     if [[ -z "$PORT" ]]; then
-        echo "❌ Porta inválida!"
+        echo -e "${RED}❌ Porta inválida!${NC}"
         sleep 2
         return
     fi
     
-    # Matar processo na porta se existir
+    # Matar processo na porta
     sudo fuser -k $PORT/tcp 2>/dev/null
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         rm -f "${PID_FILE}${PORT}.pid"
     fi
     
-    echo ""
     echo -e "${YELLOW}🔓 Abrindo porta ${PORT}...${NC}"
     
-    # Iniciar com todos os protocolos
+    if [ ! -f "$ZXPROXY" ]; then
+        echo -e "${RED}❌ ZXProxy não encontrado!${NC}"
+        sleep 3
+        return
+    fi
+    
+    # Construir argumentos baseado nas configurações
+    ARGS="-p ${PORT}"
+    
+    if [ "$WEBSOCKET" = "active" ]; then
+        ARGS="$ARGS --websocket"
+    fi
+    if [ "$SECURITY" = "active" ]; then
+        ARGS="$ARGS --security"
+    fi
+    if [ "$SOCKS5" = "active" ]; then
+        ARGS="$ARGS --socks5"
+    fi
+    if [ "$TLS" = "active" ]; then
+        ARGS="$ARGS --tls"
+    fi
+    
+    # Iniciar
     if [ "$PORT" -lt 1024 ]; then
-        nohup sudo ${ZXPROXY} -p ${PORT} -d > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+        nohup sudo ${ZXPROXY} ${ARGS} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     else
-        nohup ${ZXPROXY} -p ${PORT} -d > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+        nohup ${ZXPROXY} ${ARGS} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     fi
     
     echo $! > "${PID_FILE}${PORT}.pid"
@@ -90,224 +202,123 @@ open_port() {
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo -e "${GREEN}✅ Porta ${PORT} aberta com sucesso!${NC}"
         echo -e "📝 Log: /tmp/zxproxy_${PORT}.log"
-        echo -e "📡 Protocolos: SOCKS5, TLS, WebSocket, HTTP, TCP"
+        echo -e "📡 Protocolos ativos:"
+        [ "$WEBSOCKET" = "active" ] && echo -e "   ✅ WebSocket"
+        [ "$SECURITY" = "active" ] && echo -e "   ✅ SECURITY"
+        [ "$SOCKS5" = "active" ] && echo -e "   ✅ SOCKS5"
+        [ "$TLS" = "active" ] && echo -e "   ✅ TLS/SSL"
     else
         echo -e "${RED}❌ Falha ao abrir porta ${PORT}!${NC}"
         rm -f "${PID_FILE}${PORT}.pid"
-        echo "📝 Verifique o log:"
-        tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
     fi
-    sleep 2
-}
-
-# Fechar porta
-close_port() {
-    read -p "Digite o número da porta: " PORT
-    if [[ -z "$PORT" ]]; then
-        echo "❌ Porta inválida!"
-        sleep 2
-        return
-    fi
-    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        PID=$(cat "${PID_FILE}${PORT}.pid")
-        sudo kill -9 $PID 2>/dev/null
-        rm -f "${PID_FILE}${PORT}.pid"
-        echo -e "${GREEN}✅ Porta ${PORT} fechada!${NC}"
-    else
-        echo -e "${RED}❌ Porta ${PORT} não está aberta!${NC}"
-    fi
-    sleep 2
-}
-
-# Multiprotocolo - Mostra todos os protocolos suportados
-show_multiprotocol() {
-    show_header
-    echo -e "${YELLOW}📡 MULTIPROTOCOLO${NC}"
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    echo -e "${GREEN}Protocolos Suportados:${NC}"
-    echo ""
-    echo "  🔐 SOCKS5      - Proxy SOCKS5 (byte 0x05)"
-    echo "  🔒 TLS/SSL     - Conexões TLS seguras"
-    echo "  🌐 WebSocket   - WebSocket com upgrade"
-    echo "  🌍 HTTP        - HTTP/HTTPS requests"
-    echo "  🔐 SECURITY    - Protocolo de segurança"
-    echo "  📦 TCP         - Fallback TCP"
-    echo ""
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    echo -e "${YELLOW}Portas Ativas com Multiprotocolo:${NC}"
-    for pidfile in ${PID_FILE}*.pid; do
-        if [ -f "$pidfile" ]; then
-            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
-            if ps -p $(cat "$pidfile") > /dev/null 2>&1; then
-                echo -e "  ${GREEN}✅ Porta $PORT${NC}"
-            fi
-        fi
-    done
-    echo ""
-    read -p "Pressione Enter para continuar..."
-}
-
-# Multistatus - Mostra status detalhado
-show_multistatus() {
-    show_header
-    echo -e "${YELLOW}📊 MULTISTATUS - Status Detalhado${NC}"
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    
-    for pidfile in ${PID_FILE}*.pid; do
-        if [ -f "$pidfile" ]; then
-            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
-            PID=$(cat "$pidfile")
-            if ps -p $PID > /dev/null 2>&1; then
-                echo -e "${GREEN}✅ Porta $PORT${NC}"
-                echo -e "   PID: $PID"
-                echo -e "   Status: ${GREEN}ATIVO${NC}"
-                echo -e "   Log: /tmp/zxproxy_${PORT}.log"
-                
-                # Tentar pegar últimas conexões do log
-                echo -e "   Últimas conexões:"
-                tail -n 5 "/tmp/zxproxy_${PORT}.log" 2>/dev/null | grep -E "(SOCKS5|TLS|WebSocket|HTTP)" | tail -3 || echo "      Nenhuma conexão recente"
-                echo ""
-            fi
-        fi
-    done
-    
-    if [ -z "$(ls ${PID_FILE}*.pid 2>/dev/null)" ]; then
-        echo -e "${RED}❌ Nenhuma porta ativa${NC}"
-    fi
-    
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    read -p "Pressione Enter para continuar..."
-}
-
-# WebSocket Security
-show_websocket_security() {
-    show_header
-    echo -e "${YELLOW}🔐 WEBSOCKET SECURITY${NC}"
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    echo -e "${GREEN}Configurações de WebSocket Security:${NC}"
-    echo ""
-    echo "  • WebSocket com TLS/SSL"
-    echo "  • Handshake completo"
-    echo "  • Keep-Alive ativo"
-    echo "  • Suporte a wss://"
-    echo ""
-    
-    # Verificar portas com WebSocket
-    echo -e "${YELLOW}Portas com WebSocket ativo:${NC}"
-    for pidfile in ${PID_FILE}*.pid; do
-        if [ -f "$pidfile" ]; then
-            PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
-            if ps -p $(cat "$pidfile") > /dev/null 2>&1; then
-                echo -e "  ${GREEN}✅ Porta $PORT${NC}"
-            fi
-        fi
-    done
-    echo ""
-    read -p "Pressione Enter para continuar..."
-}
-
-# SOCKS5
-show_socks5() {
-    show_header
-    echo -e "${YELLOW}🔐 SOCKS5 PROXY${NC}"
-    echo -e "${BLUE}=========================================${NC}"
-    echo ""
-    echo -e "${GREEN}Configurações SOCKS5:${NC}"
-    echo ""
-    echo "  • Porta padrão: 1080"
-    echo "  • Sem autenticação"
-    echo "  • Suporte a IPv4 e Domínios"
-    echo "  • Compatível com qualquer app"
-    echo ""
-    
-    read -p "Deseja abrir uma porta SOCKS5? (s/n): " RESP
-    if [[ "$RESP" == "s" || "$RESP" == "S" ]]; then
-        read -p "Digite a porta (ex: 1080): " PORT
-        if [[ -n "$PORT" ]]; then
-            open_port_specific "$PORT" "socks5"
-        fi
-    fi
-}
-
-# Função para abrir porta com protocolo específico
-open_port_specific() {
-    PORT=$1
-    PROTO=$2
-    
-    sudo fuser -k $PORT/tcp 2>/dev/null
-    if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        rm -f "${PID_FILE}${PORT}.pid"
-    fi
-    
-    echo -e "${YELLOW}🔓 Abrindo porta ${PORT} com ${PROTO}...${NC}"
-    
-    if [ "$PORT" -lt 1024 ]; then
-        nohup sudo ${ZXPROXY} -p ${PORT} -d > "/tmp/zxproxy_${PORT}.log" 2>&1 &
-    else
-        nohup ${ZXPROXY} -p ${PORT} -d > "/tmp/zxproxy_${PORT}.log" 2>&1 &
-    fi
-    
-    echo $! > "${PID_FILE}${PORT}.pid"
     sleep 3
-    
-    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo -e "${GREEN}✅ Porta ${PORT} aberta!${NC}"
-        echo -e "📡 Protocolo: ${PROTO}"
-    else
-        echo -e "${RED}❌ Falha!${NC}"
-        rm -f "${PID_FILE}${PORT}.pid"
-    fi
-    sleep 2
 }
 
-# Ver logs
-show_logs() {
+alterar_status() {
     show_header
-    echo -e "${YELLOW}📝 LOGS DO ZXProxy${NC}"
-    echo -e "${BLUE}=========================================${NC}"
+    echo -e "${YELLOW}🔄 ALTERAR STATUS${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
     echo ""
     
-    # Listar logs disponíveis
-    echo -e "${GREEN}Logs disponíveis:${NC}"
-    ls -la /tmp/zxproxy_*.log 2>/dev/null || echo "  Nenhum log encontrado"
-    echo ""
-    
-    read -p "Digite a porta para ver o log (ou Enter para sair): " PORT
-    if [ -n "$PORT" ] && [ -f "/tmp/zxproxy_${PORT}.log" ]; then
+    if pgrep -f "zxproxy.*-p" > /dev/null; then
+        echo -e "${GREEN}✅ Proxy está ATIVO${NC}"
         echo ""
-        echo -e "${YELLOW}=== Últimas 50 linhas do log da porta ${PORT} ===${NC}"
+        echo -e "${CYAN}[01] • PARAR PROXY${NC}"
+        echo -e "${CYAN}[02] • REINICIAR PROXY${NC}"
+        echo -e "${CYAN}[03] • VOLTAR${NC}"
         echo ""
-        tail -n 50 "/tmp/zxproxy_${PORT}.log"
+        echo -n -e "${YELLOW}INFORME UMA OPCAO: ${NC}"
+        read OPT
+        
+        case $OPT in
+            01|1)
+                echo -e "${YELLOW}🛑 Parando proxy...${NC}"
+                sudo pkill -9 zxproxy 2>/dev/null
+                sudo rm -f /tmp/*proxy*.pid
+                echo -e "${GREEN}✅ Proxy parado!${NC}"
+                sleep 2
+                ;;
+            02|2)
+                echo -e "${YELLOW}🔄 Reiniciando proxy...${NC}"
+                sudo pkill -9 zxproxy 2>/dev/null
+                sudo rm -f /tmp/*proxy*.pid
+                sleep 2
+                abrir_porta
+                ;;
+            03|3)
+                return
+                ;;
+            *)
+                echo -e "${RED}❌ Opção inválida!${NC}"
+                sleep 2
+                ;;
+        esac
+    else
+        echo -e "${RED}❌ Proxy está INATIVO${NC}"
         echo ""
-        read -p "Pressione Enter para continuar..."
+        echo -e "${CYAN}[01] • INICIAR PROXY${NC}"
+        echo -e "${CYAN}[02] • VOLTAR${NC}"
+        echo ""
+        echo -n -e "${YELLOW}INFORME UMA OPCAO: ${NC}"
+        read OPT
+        
+        case $OPT in
+            01|1)
+                abrir_porta
+                ;;
+            02|2)
+                return
+                ;;
+            *)
+                echo -e "${RED}❌ Opção inválida!${NC}"
+                sleep 2
+                ;;
+        esac
     fi
 }
 
-# Loop principal
+parar_websocket_security() {
+    show_header
+    echo -e "${YELLOW}🛑 PARAR WEBSOCKET SECURITY${NC}"
+    echo -e "${BLUE}═══════════════════════════════════════════${NC}"
+    echo ""
+    
+    echo -e "${RED}⚠️  ATENÇÃO: Isso vai parar o WebSocket Security${NC}"
+    echo ""
+    read -p "Tem certeza? (s/n): " CONFIRM
+    
+    if [[ "$CONFIRM" == "s" || "$CONFIRM" == "S" ]]; then
+        echo -e "${YELLOW}🛑 Parando WebSocket Security...${NC}"
+        
+        # Parar todos os processos
+        sudo pkill -9 zxproxy 2>/dev/null
+        sudo rm -f /tmp/*proxy*.pid
+        
+        # Desativar WebSocket nas configurações
+        WEBSOCKET="inactive"
+        save_config
+        
+        echo -e "${GREEN}✅ WebSocket Security parado!${NC}"
+        echo -e "📝 Para reativar, vá em MULTIPROTOCOLO"
+        sleep 3
+    else
+        echo -e "${GREEN}✅ Operação cancelada!${NC}"
+        sleep 2
+    fi
+}
+
+# Loop principal do menu
 while true; do
-    show_menu
-    read OPTION
-    case $OPTION in
-        01|1) open_port ;;
-        02|2) close_port ;;
+    show_menu_principal
+    read OPT
+    
+    case $OPT in
+        01|1) abrir_porta ;;
+        02|2) alterar_status ;;
         03|3) show_multiprotocol ;;
         04|4) show_multistatus ;;
-        05|5) show_websocket_security ;;
-        06|6) show_socks5 ;;
-        07|7) 
-            echo "🔒 TLS/SSL ativo em todas as portas"
-            sleep 2
-            ;;
-        08|8) 
-            show_multistatus
-            ;;
-        09|9) show_logs ;;
-        10|0) 
+        05|5) parar_websocket_security ;;
+        06|6) 
             echo -e "${GREEN}👋 Saindo...${NC}"
             exit 0 
             ;;
