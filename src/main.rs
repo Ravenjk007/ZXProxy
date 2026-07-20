@@ -3,7 +3,6 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error, debug};
-use std::collections::HashMap;
 
 mod socks5;
 mod tcp_fallback;
@@ -38,6 +37,7 @@ async fn main() -> Result<()> {
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
     info!("📡 Protocols: SOCKS5, TLS, WebSocket, HTTP, Security, TCP");
+    info!("💡 VPN Mode: Accepting any HTTP request with 200 OK");
 
     let listener = TcpListener::bind(&addr).await?;
     
@@ -69,7 +69,6 @@ async fn handle_connection(mut socket: tokio::net::TcpStream, peer_addr: std::ne
     
     match protocol {
         "HTTP" => {
-            // Handshake HTTP completo
             http_handler::handle_http(socket, peer_addr).await?;
         }
         "WEBSOCKET" => {
@@ -97,9 +96,17 @@ fn detect_protocol(data: &[u8]) -> &'static str {
         return "UNKNOWN";
     }
     
-    // Verificar HTTP
+    // Tentar converter para string e verificar se é HTTP
     if let Ok(text) = std::str::from_utf8(data) {
-        // Verificar se é uma requisição HTTP
+        let text_lower = text.to_lowercase();
+        
+        // Verificar WebSocket
+        if text_lower.contains("upgrade: websocket") || 
+           text_lower.contains("sec-websocket-key") {
+            return "WEBSOCKET";
+        }
+        
+        // Verificar HTTP
         if text.starts_with("GET ") || 
            text.starts_with("POST ") || 
            text.starts_with("PUT ") || 
@@ -108,15 +115,13 @@ fn detect_protocol(data: &[u8]) -> &'static str {
            text.starts_with("HEAD ") ||
            text.starts_with("OPTIONS ") ||
            text.starts_with("PATCH ") ||
-           text.starts_with("HTTP/") {
-            
-            // Verificar se é WebSocket
-            if text.contains("Upgrade: websocket") || 
-               text.contains("upgrade: websocket") ||
-               text.contains("Sec-WebSocket-Key") {
-                return "WEBSOCKET";
-            }
+           text.contains("HTTP/") {
             return "HTTP";
+        }
+        
+        // Verificar SECURITY/AUTH
+        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
+            return "SECURITY";
         }
     }
     
@@ -127,18 +132,7 @@ fn detect_protocol(data: &[u8]) -> &'static str {
     
     // Verificar TLS
     if data.len() >= 3 && data[0] == 0x16 {
-        let version = ((data[1] as u16) << 8) | data[2] as u16;
-        if version >= 0x0301 && version <= 0x0304 {
-            return "TLS";
-        }
-        return "SECURITY";
-    }
-    
-    // Verificar SECURITY/AUTH
-    if let Ok(text) = std::str::from_utf8(data) {
-        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
-            return "SECURITY";
-        }
+        return "TLS";
     }
     
     "TCP"
