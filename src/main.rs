@@ -1,19 +1,13 @@
 use tokio::net::TcpListener;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
-
-mod socks5;
-mod tls;
-mod websocket;
-mod tcp_fallback;
-mod security;
-mod http;
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
-#[command(about = "ZXProxy - Multiprotocol VPN/HTTP Inject")]
+#[command(about = "ZXProxy - VPN/HTTP Inject Optimized")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "8080")]
     port: u16,
@@ -36,70 +30,66 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 Protocols: SOCKS5, TLS, WebSocket, HTTP, SECURITY, TCP");
-    info!("💡 Multiprotocol Mode: Auto-detect and handle");
+    info!("📡 VPN Mode: Read all data, then 200 OK + Keep-Alive");
 
     let listener = TcpListener::bind(&addr).await?;
     
-    while let Ok((socket, peer_addr)) = listener.accept().await {
+    while let Ok((mut socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
-            let mut buf = [0u8; 1024];
+            let mut buffer = vec![0u8; 8192];
             
-            match socket.peek(&mut buf).await {
+            // LER TODOS OS DADOS PRIMEIRO
+            match socket.read(&mut buffer).await {
                 Ok(n) if n > 0 => {
-                    let protocol = detect_protocol(&buf[..n]);
-                    info!("📡 [{}] Protocol: {}", peer_addr, protocol);
+                    let request = String::from_utf8_lossy(&buffer[..n]);
+                    let first_line = request.lines().next().unwrap_or("");
+                    info!("📩 [{}] {}", peer_addr, first_line);
+                    info!("📩 [{}] Full request:\n{}", peer_addr, request);
                     
-                    let result = match protocol {
-                        "SOCKS5" => socks5::handle_socks5(socket).await,
-                        "TLS" => tls::handle_tls(socket).await,
-                        "WEBSOCKET" => websocket::handle_websocket(socket).await,
-                        "HTTP" => http::handle_http(socket).await,
-                        "SECURITY" => security::handle_security(socket).await,
-                        _ => tcp_fallback::handle_tcp(socket).await,
-                    };
+                    // Verificar se é WebSocket
+                    let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
+                                       request.to_lowercase().contains("sec-websocket-key");
                     
-                    if let Err(e) = result {
-                        error!("❌ [{}] Error: {}", peer_addr, e);
+                    // SÓ RESPONDER DEPOIS DE LER TUDO
+                    if is_websocket {
+                        let response = "HTTP/1.1 101 Switching Protocols\r\n\
+                                        Upgrade: websocket\r\n\
+                                        Connection: Upgrade\r\n\
+                                        Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                                        \r\n";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        info!("✅ [{}] 101 WebSocket", peer_addr);
+                    } else {
+                        // RESPOSTA 200 OK COM KEEP-ALIVE
+                        let response = "HTTP/1.1 200 OK\r\n\
+                                        Content-Type: text/plain\r\n\
+                                        Content-Length: 2\r\n\
+                                        Connection: keep-alive\r\n\
+                                        Server: ZXProxy\r\n\
+                                        \r\n\
+                                        OK";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        info!("✅ [{}] 200 OK sent", peer_addr);
+                    }
+                    
+                    // MANTER CONEXÃO VIVA COM KEEP-ALIVE
+                    let mut interval = tokio::time::interval(Duration::from_secs(20));
+                    loop {
+                        interval.tick().await;
+                        // Enviar keep-alive (apenas um espaço ou \r\n)
+                        match socket.write_all(b"\r\n").await {
+                            Ok(_) => info!("💓 [{}] Keep-alive", peer_addr),
+                            Err(_) => {
+                                info!("🔚 [{}] Connection closed by client", peer_addr);
+                                break;
+                            }
+                        }
                     }
                 }
-                Ok(_) => info!("📦 [{}] Connection closed", peer_addr),
-                Err(e) => error!("❌ [{}] Peek error: {}", peer_addr, e),
+                Ok(_) => info!("📦 [{}] Empty request", peer_addr),
+                Err(e) => error!("❌ [{}] Read error: {}", peer_addr, e),
             }
         });
     }
     Ok(())
-}
-
-fn detect_protocol(data: &[u8]) -> &'static str {
-    if data.is_empty() { return "UNKNOWN"; }
-    
-    // HTTP/WebSocket
-    if let Ok(text) = std::str::from_utf8(data) {
-        let text_lower = text.to_lowercase();
-        
-        if text_lower.contains("upgrade: websocket") || text_lower.contains("sec-websocket-key") {
-            return "WEBSOCKET";
-        }
-        
-        if text.starts_with("GET ") || text.starts_with("POST ") || 
-           text.starts_with("PUT ") || text.starts_with("DELETE ") || 
-           text.starts_with("CONNECT ") || text.starts_with("HEAD ") ||
-           text.starts_with("OPTIONS ") || text.starts_with("PATCH ") ||
-           text.contains("HTTP/") {
-            return "HTTP";
-        }
-        
-        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
-            return "SECURITY";
-        }
-    }
-    
-    // SOCKS5
-    if data.len() >= 1 && data[0] == 0x05 { return "SOCKS5"; }
-    
-    // TLS
-    if data.len() >= 3 && data[0] == 0x16 { return "TLS"; }
-    
-    "TCP"
 }
