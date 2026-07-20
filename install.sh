@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZXProxy Installer
+# ZXProxy Installer - VPN Optimized with Keep-Alive
 REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
@@ -40,17 +40,17 @@ else
     case $OS_NAME in
         Ubuntu)
             case $VERSION in
-                24.*|22.*|20.*|18.*) show_progress "✅ Sistema Ubuntu suportado, continuando..." ;;
-                *) error_exit "Versão do Ubuntu não suportada. Use 18, 20, 22 ou 24." ;;
+                24.*|22.*|20.*|18.*) show_progress "✅ Sistema Ubuntu suportado..." ;;
+                *) error_exit "Versão do Ubuntu não suportada." ;;
             esac
             ;;
         Debian)
             case $VERSION in
-                12*|11*|10*|9*) show_progress "✅ Sistema Debian suportado, continuando..." ;;
-                *) error_exit "Versão do Debian não suportada. Use 9, 10, 11 ou 12." ;;
+                12*|11*|10*|9*) show_progress "✅ Sistema Debian suportado..." ;;
+                *) error_exit "Versão do Debian não suportada." ;;
             esac
             ;;
-        *) error_exit "Sistema não suportado. Use Ubuntu ou Debian." ;;
+        *) error_exit "Sistema não suportado." ;;
     esac
     increment_step
 
@@ -70,15 +70,13 @@ else
     fi
     increment_step
 
-    show_progress "Compilando ZXProxy, isso pode levar algum tempo..."
+    show_progress "Compilando ZXProxy (com Keep-Alive)..."
     
-    # Criar projeto do zero em vez de clonar
     cd /root
     rm -rf ZXProxy
     cargo new ZXProxy > /dev/null 2>&1 || error_exit "Falha ao criar projeto"
     cd ZXProxy
 
-    # Cargo.toml
     cat > Cargo.toml << 'EOF'
 [package]
 name = "zxproxy"
@@ -97,13 +95,13 @@ name = "zxproxy"
 path = "src/main.rs"
 EOF
 
-    # main.rs
     cat > src/main.rs << 'EOF'
 use tokio::net::TcpListener;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
+use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
@@ -130,40 +128,50 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 VPN Mode: Always respond 200 OK");
+    info!("📡 VPN Mode: 200 OK + Keep-Alive Forever");
 
     let listener = TcpListener::bind(&addr).await?;
     
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
             let mut buffer = [0u8; 4096];
+            
             match socket.read(&mut buffer).await {
                 Ok(n) if n > 0 => {
                     let request = String::from_utf8_lossy(&buffer[..n]);
                     let first_line = request.lines().next().unwrap_or("");
                     info!("📩 [{}] {}", peer_addr, first_line);
                     
-                    if request.to_lowercase().contains("upgrade: websocket") {
+                    let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
+                                       request.to_lowercase().contains("sec-websocket-key");
+                    
+                    if is_websocket {
                         let response = "HTTP/1.1 101 Switching Protocols\r\n\
                                         Upgrade: websocket\r\n\
                                         Connection: Upgrade\r\n\
                                         Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
                                         \r\n";
                         let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 101 Switching Protocols", peer_addr);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
-                        return;
+                        info!("✅ [{}] 101 WebSocket - Keep-Alive", peer_addr);
+                    } else {
+                        let response = "HTTP/1.1 200 OK\r\n\
+                                        Content-Type: text/plain\r\n\
+                                        Content-Length: 2\r\n\
+                                        Connection: keep-alive\r\n\
+                                        Server: ZXProxy\r\n\
+                                        \r\n\
+                                        OK";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        info!("✅ [{}] 200 OK - Keep-Alive", peer_addr);
                     }
                     
-                    let response = "HTTP/1.1 200 OK\r\n\
-                                    Content-Type: text/plain\r\n\
-                                    Content-Length: 2\r\n\
-                                    Connection: keep-alive\r\n\
-                                    Server: ZXProxy\r\n\
-                                    \r\n\
-                                    OK";
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    info!("✅ [{}] 200 OK sent", peer_addr);
+                    // MANTER CONEXÃO VIVA PARA SEMPRE!
+                    let mut interval = tokio::time::interval(Duration::from_secs(25));
+                    loop {
+                        interval.tick().await;
+                        let _ = socket.write_all(b"\r\n").await;
+                        info!("💓 [{}] Keep-alive", peer_addr);
+                    }
                 }
                 Ok(_) => info!("📦 [{}] Empty", peer_addr),
                 Err(e) => error!("❌ [{}] Error: {}", peer_addr, e),
@@ -179,16 +187,11 @@ EOF
     if [ $? -ne 0 ]; then
         echo "❌ Erro na compilação:"
         tail -n 30 /tmp/zxproxy_build.log
-        error_exit "Falha ao compilar ZXProxy"
+        error_exit "Falha ao compilar"
     fi
 
-    # CORREÇÃO: Procurar pelo binário correto
     if [ -f ./target/release/zxproxy ]; then
-        mv ./target/release/zxproxy /opt/zxproxy/proxy || error_exit "Falha ao mover binário"
-    elif [ -f ./target/release/vsproxy ]; then
-        mv ./target/release/vsproxy /opt/zxproxy/proxy || error_exit "Falha ao mover binário"
-    elif [ -f ./target/release/bsproxy ]; then
-        mv ./target/release/bsproxy /opt/zxproxy/proxy || error_exit "Falha ao mover binário"
+        mv ./target/release/zxproxy /opt/zxproxy/proxy
     else
         error_exit "Binário não encontrado"
     fi
@@ -199,7 +202,7 @@ EOF
     show_progress "Configurando permissões..."
     chmod +x /opt/zxproxy/proxy
 
-    # CORREÇÃO: Salvar o menu.sh diretamente
+    # Menu
     cat > /opt/zxproxy/menu << 'EOF'
 #!/bin/bash
 ZXPROXY="/opt/zxproxy/proxy"
@@ -228,34 +231,31 @@ show_menu() {
         echo "Porta(s): nenhuma"
     fi
     echo ""
-    echo " 1 - Abrir Porta"
+    echo " 1 - Abrir Porta (Keep-Alive)"
     echo " 2 - Fechar Porta"
-    echo " 3 - Status do Proxy"
-    echo " 4 - Sair"
+    echo " 3 - Status"
+    echo " 4 - Ver Logs"
+    echo " 5 - Sair"
     echo ""
-    echo -n "--> Selecione uma opção: "
+    echo -n "--> "
 }
 
 open_port() {
-    read -p "Digite o número da porta: " PORT
+    read -p "Digite a porta: " PORT
     if [[ -z "$PORT" ]]; then
-        echo "❌ Porta inválida!"
+        echo "❌ Inválida!"
         sleep 2
         return
     fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
-        echo "❌ Porta ${PORT} já está aberta!"
+        echo "❌ Porta já aberta!"
         sleep 2
         return
     fi
     echo "🔓 Abrindo porta ${PORT}..."
-    if [ ! -f "$ZXPROXY" ]; then
-        echo "❌ ZXProxy não encontrado!"
-        sleep 3
-        return
-    fi
     
-    # Verificar se precisa de sudo para porta baixa
+    sudo fuser -k $PORT/tcp 2>/dev/null
+    
     if [ "$PORT" -lt 1024 ]; then
         nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     else
@@ -265,50 +265,49 @@ open_port() {
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta!"
+        echo "✅ Porta ${PORT} aberta com Keep-Alive!"
         echo "📝 Log: /tmp/zxproxy_${PORT}.log"
     else
-        echo "❌ Falha ao abrir porta ${PORT}!"
+        echo "❌ Falha!"
         rm -f "${PID_FILE}${PORT}.pid"
-        echo "📝 Verifique o log: /tmp/zxproxy_${PORT}.log"
-        tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
+        tail -n 5 "/tmp/zxproxy_${PORT}.log"
     fi
     sleep 2
 }
 
 close_port() {
-    read -p "Digite o número da porta: " PORT
-    if [[ -z "$PORT" ]]; then
-        echo "❌ Porta inválida!"
-        sleep 2
-        return
-    fi
+    read -p "Digite a porta: " PORT
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         PID=$(cat "${PID_FILE}${PORT}.pid")
         sudo kill -9 $PID 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
         echo "✅ Porta ${PORT} fechada!"
     else
-        echo "❌ Porta ${PORT} não está aberta!"
+        echo "❌ Porta não está aberta!"
     fi
     sleep 2
 }
 
 show_status() {
-    echo "📊 Status do ZXProxy:"
-    echo "===================="
+    echo "📊 Status:"
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
             PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
             PID=$(cat "$pidfile")
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
-                echo "   Log: /tmp/zxproxy_${PORT}.log"
             fi
         fi
     done
     echo ""
-    read -p "Pressione Enter para continuar..."
+    read -p "Enter..."
+}
+
+show_logs() {
+    echo "📝 Logs:"
+    tail -n 20 /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log"
+    echo ""
+    read -p "Enter..."
 }
 
 while true; do
@@ -318,33 +317,30 @@ while true; do
         1) open_port ;;
         2) close_port ;;
         3) show_status ;;
-        4) echo "👋 Saindo..."; exit 0 ;;
-        *) echo "❌ Opção inválida!"; sleep 2 ;;
+        4) show_logs ;;
+        5) echo "👋 Saindo..."; exit 0 ;;
+        *) echo "❌ Inválido!"; sleep 2 ;;
     esac
 done
 EOF
 
     chmod +x /opt/zxproxy/menu
-    
-    # Criar link
     ln -sf /opt/zxproxy/menu /usr/local/bin/"$CMD_NAME"
     chmod +x /usr/local/bin/"$CMD_NAME"
     increment_step
 
-    show_progress "Limpando diretórios temporários..."
+    show_progress "Limpando..."
     cd /root/
     rm -rf /root/ZXProxy/
     increment_step
 
     echo ""
-    echo -e "\033[0;32m✅ Instalação concluída com sucesso!\033[0m"
+    echo -e "\033[0;32m✅ Instalação concluída!\033[0m"
     echo ""
-    echo "🚀 Digite '$CMD_NAME' para acessar o menu."
-    echo "   Ou 'zxproxy -p 80' para abrir porta 80 diretamente."
+    echo "🚀 Digite 'zxproxy' para o menu"
     echo ""
-    echo "📡 Protocolos suportados:"
-    echo "   - HTTP (SEMPRE 200 OK)"
-    echo "   - WebSocket (101 Switching Protocols)"
-    echo "   - TCP Fallback"
+    echo "📡 AGORA COM KEEP-ALIVE!"
+    echo "   A conexão NÃO será fechada após responder"
+    echo "   O app VPN vai conseguir manter o túnel SSH"
     echo ""
 fi
