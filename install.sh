@@ -1,5 +1,5 @@
 #!/bin/bash
-# ZXProxy Installer
+# ZXProxy Installer - com menu.sh original
 REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
@@ -70,7 +70,7 @@ else
     fi
     increment_step
 
-    show_progress "Compilando ZXProxy (Multiprotocol)..."
+    show_progress "Compilando ZXProxy (com Keep-Alive)..."
     
     cd /root
     rm -rf ZXProxy
@@ -105,7 +105,7 @@ use std::time::Duration;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
-#[command(about = "ZXProxy - Multiprotocol VPN/HTTP Inject")]
+#[command(about = "ZXProxy - VPN/HTTP Inject Optimized")]
 struct Cli {
     #[arg(short = 'p', long = "port", default_value = "8080")]
     port: u16,
@@ -128,37 +128,53 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 Multiprotocol Mode: SOCKS5, TLS, WebSocket, HTTP, SECURITY");
+    info!("📡 VPN Mode: Read all, 200 OK, Keep-Alive Forever");
 
     let listener = TcpListener::bind(&addr).await?;
     
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
-            let mut buffer = [0u8; 1024];
+            let mut buffer = vec![0u8; 8192];
             
-            match socket.peek(&mut buffer).await {
+            match socket.read(&mut buffer).await {
                 Ok(n) if n > 0 => {
-                    let protocol = detect_protocol(&buffer[..n]);
-                    info!("📡 [{}] Protocol: {}", peer_addr, protocol);
+                    let request = String::from_utf8_lossy(&buffer[..n]);
+                    let first_line = request.lines().next().unwrap_or("");
+                    info!("📩 [{}] {}", peer_addr, first_line);
                     
-                    let response = "HTTP/1.1 200 OK\r\n\
-                                    Content-Type: text/plain\r\n\
-                                    Content-Length: 2\r\n\
-                                    Connection: keep-alive\r\n\
-                                    Server: ZXProxy\r\n\
-                                    \r\n\
-                                    OK";
-                    let _ = socket.write_all(response.as_bytes()).await;
-                    info!("✅ [{}] 200 OK sent", peer_addr);
+                    let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
+                                       request.to_lowercase().contains("sec-websocket-key");
                     
-                    let mut interval = tokio::time::interval(Duration::from_secs(15));
+                    if is_websocket {
+                        let response = "HTTP/1.1 101 Switching Protocols\r\n\
+                                        Upgrade: websocket\r\n\
+                                        Connection: Upgrade\r\n\
+                                        Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
+                                        \r\n";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        info!("✅ [{}] 101 WebSocket", peer_addr);
+                    } else {
+                        let response = "HTTP/1.1 200 OK\r\n\
+                                        Content-Type: text/plain\r\n\
+                                        Content-Length: 2\r\n\
+                                        Connection: keep-alive\r\n\
+                                        Server: ZXProxy\r\n\
+                                        \r\n\
+                                        OK";
+                        let _ = socket.write_all(response.as_bytes()).await;
+                        info!("✅ [{}] 200 OK sent", peer_addr);
+                    }
+                    
+                    // KEEP-ALIVE INFINITO
+                    let mut interval = tokio::time::interval(Duration::from_secs(20));
                     loop {
                         interval.tick().await;
-                        if socket.write_all(b"\r\n").await.is_err() {
-                            info!("🔚 [{}] Connection closed", peer_addr);
-                            break;
+                        match socket.write_all(b"\r\n").await {
+                            Ok(_) => info!("💓 [{}] Keep-alive", peer_addr),
+                            Err(_) => break,
                         }
                     }
+                    info!("🔚 [{}] Connection closed", peer_addr);
                 }
                 Ok(_) => info!("📦 [{}] Empty", peer_addr),
                 Err(e) => error!("❌ [{}] Error: {}", peer_addr, e),
@@ -166,31 +182,6 @@ async fn main() -> Result<()> {
         });
     }
     Ok(())
-}
-
-fn detect_protocol(data: &[u8]) -> &'static str {
-    if data.is_empty() { return "UNKNOWN"; }
-    
-    if data.len() >= 1 && data[0] == 0x05 { return "SOCKS5"; }
-    if data.len() >= 3 && data[0] == 0x16 { return "TLS"; }
-    
-    if let Ok(text) = std::str::from_utf8(data) {
-        let text_lower = text.to_lowercase();
-        if text_lower.contains("upgrade: websocket") || text_lower.contains("sec-websocket-key") {
-            return "WEBSOCKET";
-        }
-        if text.starts_with("GET ") || text.starts_with("POST ") || 
-           text.starts_with("PUT ") || text.starts_with("DELETE ") || 
-           text.starts_with("CONNECT ") || text.starts_with("HEAD ") ||
-           text.starts_with("OPTIONS ") || text.starts_with("PATCH ") ||
-           text.contains("HTTP/") {
-            return "HTTP";
-        }
-        if text.starts_with("SECURITY") || text.starts_with("AUTH") {
-            return "SECURITY";
-        }
-    }
-    "TCP"
 }
 EOF
 
@@ -210,14 +201,10 @@ EOF
     fi
     increment_step
 
-    show_progress "Configurando menu..."
+    show_progress "Configurando menu.sh..."
     
-    # Baixar menu.sh do GitHub
-    curl -s -o /opt/zxproxy/menu.sh "https://raw.githubusercontent.com/Ravenjk007/ZXProxy/main/menu.sh"
-    
-    if [ ! -f /opt/zxproxy/menu.sh ]; then
-        # Menu de fallback
-        cat > /opt/zxproxy/menu.sh << 'EOF'
+    # Salvar o menu.sh diretamente
+    cat > /opt/zxproxy/menu.sh << 'EOF'
 #!/bin/bash
 ZXPROXY="/opt/zxproxy/proxy"
 PID_FILE="/tmp/zxproxy_"
@@ -247,74 +234,106 @@ show_menu() {
     echo ""
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
-    echo " 3 - Status"
+    echo " 3 - Status do Proxy"
     echo " 4 - Ver Logs"
     echo " 5 - Sair"
     echo ""
-    echo -n "--> "
+    echo -n "--> Selecione uma opção: "
 }
 
 open_port() {
-    read -p "Digite a porta: " PORT
+    read -p "Digite o número da porta: " PORT
     if [[ -z "$PORT" ]]; then
-        echo "❌ Inválida!"
+        echo "❌ Porta inválida!"
         sleep 2
         return
     fi
+    
     sudo fuser -k $PORT/tcp 2>/dev/null
+    
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         rm -f "${PID_FILE}${PORT}.pid"
     fi
+    
     echo "🔓 Abrindo porta ${PORT}..."
+    if [ ! -f "$ZXPROXY" ]; then
+        echo "❌ ZXProxy não encontrado!"
+        sleep 3
+        return
+    fi
+    
     if [ "$PORT" -lt 1024 ]; then
         nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     else
         nohup ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
     fi
+    
     echo $! > "${PID_FILE}${PORT}.pid"
-    sleep 2
+    sleep 3
+    
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
-        echo "✅ Porta ${PORT} aberta!"
+        echo "✅ Porta ${PORT} aberta com Keep-Alive!"
+        echo "📝 Log: /tmp/zxproxy_${PORT}.log"
     else
-        echo "❌ Falha!"
+        echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
+        tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
     fi
     sleep 2
 }
 
 close_port() {
-    read -p "Digite a porta: " PORT
+    read -p "Digite o número da porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Porta inválida!"
+        sleep 2
+        return
+    fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         PID=$(cat "${PID_FILE}${PORT}.pid")
         sudo kill -9 $PID 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
         echo "✅ Porta ${PORT} fechada!"
     else
-        echo "❌ Porta não está aberta!"
+        echo "❌ Porta ${PORT} não está aberta!"
     fi
     sleep 2
 }
 
 show_status() {
-    echo "📊 Status:"
+    echo "📊 Status do ZXProxy:"
+    echo "===================="
+    echo ""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
             PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
             PID=$(cat "$pidfile")
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
+                echo "   Log: /tmp/zxproxy_${PORT}.log"
+            else
+                echo "❌ Porta $PORT: processo morto"
+                rm -f "$pidfile"
             fi
         fi
     done
     echo ""
-    read -p "Enter..."
+    read -p "Pressione Enter para continuar..."
 }
 
 show_logs() {
-    echo "📝 Logs:"
-    tail -n 30 /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log"
+    echo "📝 Logs do ZXProxy:"
+    echo "==================="
     echo ""
-    read -p "Enter..."
+    ls -la /tmp/zxproxy_*.log 2>/dev/null || echo "Nenhum log encontrado"
+    echo ""
+    read -p "Digite a porta para ver o log (ou Enter para sair): " PORT
+    if [ -n "$PORT" ] && [ -f "/tmp/zxproxy_${PORT}.log" ]; then
+        echo ""
+        tail -n 30 "/tmp/zxproxy_${PORT}.log"
+        echo ""
+        read -p "Pressione Enter para continuar..."
+    fi
 }
 
 while true; do
@@ -326,36 +345,34 @@ while true; do
         3) show_status ;;
         4) show_logs ;;
         5) echo "👋 Saindo..."; exit 0 ;;
-        *) echo "❌ Inválido!"; sleep 2 ;;
+        *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
 EOF
-    fi
 
     chmod +x /opt/zxproxy/menu.sh
+    
+    # Criar link
     ln -sf /opt/zxproxy/menu.sh /usr/local/bin/"$CMD_NAME"
     chmod +x /usr/local/bin/"$CMD_NAME"
     increment_step
 
-    show_progress "Limpando..."
+    show_progress "Limpando diretórios temporários..."
     cd /root/
     rm -rf /root/ZXProxy/
     increment_step
 
     echo ""
-    echo -e "\033[0;32m✅ Instalação concluída!\033[0m"
+    echo -e "\033[0;32m✅ Instalação concluída com sucesso!\033[0m"
     echo ""
     echo "🚀 Digite '$CMD_NAME' para acessar o menu."
     echo "   Ou 'zxproxy -p 80' para abrir porta 80 diretamente."
     echo ""
     echo "📡 Protocolos suportados:"
-    echo "   - SOCKS5 (byte 0x05)"
-    echo "   - TLS/SSL (byte 0x16)"
-    echo "   - WebSocket (Upgrade: websocket)"
-    echo "   - HTTP (GET, POST, PUT, DELETE, etc)"
-    echo "   - SECURITY (AUTH ou SECURITY)"
+    echo "   - HTTP (SEMPRE 200 OK + Keep-Alive)"
+    echo "   - WebSocket (101 Switching Protocols)"
     echo "   - TCP Fallback"
     echo ""
-    echo "💓 Keep-Alive ativo para VPN/HTTP Inject!"
+    echo "💓 Keep-Alive ativo para VPN/HTTP!"
     echo ""
 fi
