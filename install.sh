@@ -1,6 +1,6 @@
 #!/bin/bash
-# ZXProxy Installer
-REPO_URL="https://github.com/Ravenjk007/ZXProxy.git"
+# install.sh - ZXProxy Installer
+REPO_URL="https://github.com/Ravenjk007/BSProxy.git"
 REPO_BRANCH="main"
 CMD_NAME="zxproxy"
 TOTAL_STEPS=9
@@ -82,30 +82,13 @@ else
     fi
 
     cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
+    cargo build --release --jobs "$(nproc)" > /dev/null 2>&1 || error_exit "Falha ao compilar ZXProxy"
 
-    show_progress "Aplicando correções de código conhecidas..."
-    if [ -f src/websocket.rs ]; then
-        sed -i 's/unwrap_or("localhost")/unwrap_or("localhost".to_string())/' src/websocket.rs
-        sed -i 's/copy_bidirectional(&mut socket, dest)/copy_bidirectional(\&mut socket, \&mut dest)/' src/websocket.rs
-    fi
-    if [ -f src/tcp_fallback.rs ]; then
-        sed -i 's/copy_bidirectional(&mut socket, dest)/copy_bidirectional(\&mut socket, \&mut dest)/' src/tcp_fallback.rs
-    fi
-
-    cargo build --release --jobs "$(nproc)" || error_exit "Falha ao compilar ZXProxy"
-
-    BIN_PATH=""
     if [ -f ./target/release/zxproxy ]; then
-        BIN_PATH="./target/release/zxproxy"
-    elif [ -f ./target/release/bsproxy ]; then
-        BIN_PATH="./target/release/bsproxy"
-    fi
-
-    if [ -n "$BIN_PATH" ]; then
-        mv "$BIN_PATH" /opt/zxproxy/proxy || error_exit "Falha ao mover o binário compilado"
+        mv ./target/release/zxproxy /opt/zxproxy/proxy || error_exit "Binário compilado não encontrado"
         chmod +x /opt/zxproxy/proxy
     else
-        error_exit "Binário compilado não encontrado (verifique o campo 'name' em [package] no Cargo.toml)"
+        error_exit "Binário 'zxproxy' não encontrado após compilação"
     fi
     increment_step
 
@@ -137,7 +120,13 @@ else
     echo "   - SOCKS5 (byte 0x05)"
     echo "   - TLS/SECURITY (byte 0x16)"
     echo "   - WebSocket (GET / ou HTTP/)"
+    echo "   - HTTP (GET, POST, PUT, DELETE, etc)"
+    echo "   - HTTPS (TLS/SSL)"
+    echo "   - SSH Tunnel (SSH-)"
+    echo "   - VPN (OpenVPN, WireGuard, IPSec, L2TP)"
     echo "   - SECURITY (AUTH ou SECURITY)"
     echo "   - TCP Fallback (qualquer outro)"
+    echo ""
+    echo "📊 Métricas: http://localhost:9090/metrics"
     echo ""
 fi
