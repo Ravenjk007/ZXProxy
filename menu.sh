@@ -1,5 +1,4 @@
 #!/bin/bash
-# ZXProxy Menu
 ZXPROXY="/opt/zxproxy/proxy"
 PID_FILE="/tmp/zxproxy_"
 
@@ -54,7 +53,7 @@ open_port() {
     fi
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
-    if ps -p $(cat "${PID_FILE}${PORT}.pid})" > /dev/null 2>&1; then
+    if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
         echo "✅ Porta ${PORT} aberta!"
     else
         echo "❌ Falha!"
