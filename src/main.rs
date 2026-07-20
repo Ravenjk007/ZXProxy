@@ -4,6 +4,8 @@ use clap::Parser;
 use anyhow::Result;
 use log::{info, error};
 use std::time::Duration;
+use sha1::{Sha1, Digest};
+use base64::Engine;
 
 #[derive(Parser)]
 #[command(name = "zxproxy")]
@@ -44,30 +46,29 @@ async fn main() -> Result<()> {
                     let first_line = request.lines().next().unwrap_or("");
                     info!("📩 [{}] {}", peer_addr, first_line);
                     
-                    // Verificar se é WebSocket
                     let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
                                        request.to_lowercase().contains("sec-websocket-key");
                     
                     if is_websocket {
-                        info!("🌐 [{}] WebSocket request detected", peer_addr);
+                        info!("🌐 [{}] WebSocket request", peer_addr);
                         
-                        // Extrair WebSocket Key
+                        // Extrair WebSocket Key corretamente
                         let ws_key = extract_websocket_key(&request);
+                        let accept_key = generate_websocket_accept(&ws_key);
                         
-                        // Resposta 101 Switching Protocols
                         let response = format!(
                             "HTTP/1.1 101 Switching Protocols\r\n\
                              Upgrade: websocket\r\n\
                              Connection: Upgrade\r\n\
                              Sec-WebSocket-Accept: {}\r\n\
                              \r\n",
-                            ws_key
+                            accept_key
                         );
                         
                         let _ = socket.write_all(response.as_bytes()).await;
                         info!("✅ [{}] 101 Switching Protocols", peer_addr);
                         
-                        // Agora manter o WebSocket vivo com dados reais
+                        // Manter WebSocket vivo com pings
                         let mut counter = 0;
                         let mut interval = tokio::time::interval(Duration::from_secs(10));
                         
@@ -75,32 +76,23 @@ async fn main() -> Result<()> {
                             interval.tick().await;
                             counter += 1;
                             
-                            // WebSocket ping frame (opcode 0x9 = ping)
-                            // Formato: 0x89 0x00 (ping frame vazio)
+                            // WebSocket ping frame
                             let ping_frame = [0x89, 0x00];
                             
                             match socket.write_all(&ping_frame).await {
-                                Ok(_) => {
-                                    info!("💓 [{}] WebSocket ping #{}", peer_addr, counter);
-                                    
-                                    // Tentar ler resposta (pong)
-                                    let mut pong_buf = [0u8; 2];
-                                    match socket.read(&mut pong_buf).await {
-                                        Ok(_) => info!("💓 [{}] Pong received", peer_addr),
-                                        Err(_) => {
-                                            info!("🔚 [{}] Connection closed", peer_addr);
-                                            break;
-                                        }
-                                    }
-                                }
+                                Ok(_) => info!("💓 [{}] WebSocket ping #{}", peer_addr, counter),
                                 Err(_) => {
                                     info!("🔚 [{}] Connection closed", peer_addr);
                                     break;
                                 }
                             }
+                            
+                            // Tentar ler pong
+                            let mut pong_buf = [0u8; 2];
+                            let _ = socket.read(&mut pong_buf).await;
                         }
                     } else {
-                        // HTTP normal - 200 OK
+                        // HTTP normal
                         let response = "HTTP/1.1 200 OK\r\n\
                                         Content-Type: text/plain\r\n\
                                         Content-Length: 2\r\n\
@@ -112,7 +104,6 @@ async fn main() -> Result<()> {
                         let _ = socket.write_all(response.as_bytes()).await;
                         info!("✅ [{}] 200 OK sent", peer_addr);
                         
-                        // Keep-alive para HTTP normal
                         let mut counter = 0;
                         let mut interval = tokio::time::interval(Duration::from_secs(15));
                         
@@ -121,7 +112,7 @@ async fn main() -> Result<()> {
                             counter += 1;
                             
                             match socket.write_all(b"\r\n\r\n").await {
-                                Ok(_) => info!("💓 [{}] HTTP keep-alive #{}", peer_addr, counter),
+                                Ok(_) => info!("💓 [{}] Keep-alive #{}", peer_addr, counter),
                                 Err(_) => {
                                     info!("🔚 [{}] Connection closed", peer_addr);
                                     break;
@@ -130,26 +121,33 @@ async fn main() -> Result<()> {
                         }
                     }
                 }
-                Ok(_) => info!("📦 [{}] Empty request", peer_addr),
-                Err(e) => error!("❌ [{}] Read error: {}", peer_addr, e),
+                Ok(_) => info!("📦 [{}] Empty", peer_addr),
+                Err(e) => error!("❌ [{}] Error: {}", peer_addr, e),
             }
         });
     }
     Ok(())
 }
 
-// Função para extrair a WebSocket Key do request
 fn extract_websocket_key(request: &str) -> String {
     for line in request.lines() {
         let line_lower = line.to_lowercase();
         if line_lower.contains("sec-websocket-key") {
             if let Some((_, value)) = line.split_once(':') {
-                let key = value.trim();
-                // Calcular accept key (simplificado para demo)
-                // Em produção use: base64(sha1(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"))
-                return "dGhlIHNhbXBsZSBub25jZQ==".to_string();
+                return value.trim().to_string();
             }
         }
     }
     "dGhlIHNhbXBsZSBub25jZQ==".to_string()
+}
+
+fn generate_websocket_accept(key: &str) -> String {
+    let guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
+    let combined = format!("{}{}", key, guid);
+    
+    let mut hasher = Sha1::new();
+    hasher.update(combined.as_bytes());
+    let result = hasher.finalize();
+    
+    base64::engine::general_purpose::STANDARD.encode(result)
 }
