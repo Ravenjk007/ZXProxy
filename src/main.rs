@@ -30,44 +30,37 @@ async fn main() -> Result<()> {
     
     let addr = format!("0.0.0.0:{}", cli.port);
     info!("🚀 ZXProxy listening on {}", addr);
-    info!("📡 VPN Mode: Always respond 200 OK and keep connection alive");
+    info!("📡 VPN Mode: Read all data, then 200 OK + Keep-Alive");
 
     let listener = TcpListener::bind(&addr).await?;
     
     while let Ok((mut socket, peer_addr)) = listener.accept().await {
         tokio::spawn(async move {
-            let mut buffer = [0u8; 4096];
+            let mut buffer = vec![0u8; 8192];
             
-            // Ler a requisição
+            // LER TODOS OS DADOS PRIMEIRO
             match socket.read(&mut buffer).await {
                 Ok(n) if n > 0 => {
                     let request = String::from_utf8_lossy(&buffer[..n]);
                     let first_line = request.lines().next().unwrap_or("");
                     info!("📩 [{}] {}", peer_addr, first_line);
+                    info!("📩 [{}] Full request:\n{}", peer_addr, request);
                     
                     // Verificar se é WebSocket
                     let is_websocket = request.to_lowercase().contains("upgrade: websocket") ||
                                        request.to_lowercase().contains("sec-websocket-key");
                     
+                    // SÓ RESPONDER DEPOIS DE LER TUDO
                     if is_websocket {
-                        // Resposta WebSocket 101
                         let response = "HTTP/1.1 101 Switching Protocols\r\n\
                                         Upgrade: websocket\r\n\
                                         Connection: Upgrade\r\n\
                                         Sec-WebSocket-Accept: dGhlIHNhbXBsZSBub25jZQ==\r\n\
                                         \r\n";
                         let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 101 Switching Protocols - Keeping connection alive", peer_addr);
-                        
-                        // MANTER CONEXÃO VIVA - ESSE É O SEGREDO!
-                        loop {
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                            // Enviar keep-alive (ping)
-                            let _ = socket.write_all(b"\r\n").await;
-                            info!("💓 [{}] Keep-alive ping sent", peer_addr);
-                        }
+                        info!("✅ [{}] 101 WebSocket", peer_addr);
                     } else {
-                        // Resposta 200 OK para qualquer outra requisição
+                        // RESPOSTA 200 OK COM KEEP-ALIVE
                         let response = "HTTP/1.1 200 OK\r\n\
                                         Content-Type: text/plain\r\n\
                                         Content-Length: 2\r\n\
@@ -76,14 +69,20 @@ async fn main() -> Result<()> {
                                         \r\n\
                                         OK";
                         let _ = socket.write_all(response.as_bytes()).await;
-                        info!("✅ [{}] 200 OK sent - Keeping connection alive", peer_addr);
-                        
-                        // MANTER CONEXÃO VIVA
-                        loop {
-                            tokio::time::sleep(Duration::from_secs(30)).await;
-                            // Enviar keep-alive
-                            let _ = socket.write_all(b"\r\n").await;
-                            info!("💓 [{}] Keep-alive ping sent", peer_addr);
+                        info!("✅ [{}] 200 OK sent", peer_addr);
+                    }
+                    
+                    // MANTER CONEXÃO VIVA COM KEEP-ALIVE
+                    let mut interval = tokio::time::interval(Duration::from_secs(20));
+                    loop {
+                        interval.tick().await;
+                        // Enviar keep-alive (apenas um espaço ou \r\n)
+                        match socket.write_all(b"\r\n").await {
+                            Ok(_) => info!("💓 [{}] Keep-alive", peer_addr),
+                            Err(_) => {
+                                info!("🔚 [{}] Connection closed by client", peer_addr);
+                                break;
+                            }
                         }
                     }
                 }
