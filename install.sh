@@ -84,43 +84,67 @@ else
         chmod +x /opt/zxproxy/menu
     fi
     
-    # Atualizar Cargo.toml para mudar o nome do binário
-    if [ -f /root/ZXProxy/Cargo.toml ]; then
-        sed -i 's/name = "bsproxy"/name = "zxproxy"/g' /root/ZXProxy/Cargo.toml
-        sed -i 's/name = "zkproxy"/name = "zxproxy"/g' /root/ZXProxy/Cargo.toml
+    # CORREÇÃO: Criar Cargo.toml limpo
+    cat > /root/ZXProxy/Cargo.toml << 'EOF'
+[package]
+name = "zxproxy"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1.35", features = ["full"] }
+rustls = "0.21"
+tokio-rustls = "0.24"
+rcgen = "0.11"
+anyhow = "1.0"
+log = "0.4"
+env_logger = "0.10"
+clap = { version = "4.4", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+warp = "0.3"
+
+[[bin]]
+name = "zxproxy"
+path = "src/main.rs"
+EOF
+    
+    # Atualizar referências no main.rs
+    if [ -f /root/ZXProxy/src/main.rs ]; then
+        sed -i 's/bsproxy/zxproxy/g' /root/ZXProxy/src/main.rs
+        sed -i 's/BSProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
+        sed -i 's/zkproxy/zxproxy/g' /root/ZXProxy/src/main.rs
+        sed -i 's/ZKProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
     fi
     
-    # Renomear o diretório src se necessário e atualizar referências
-    if [ -d /root/ZXProxy/src ]; then
-        # Atualizar referências no main.rs
-        if [ -f /root/ZXProxy/src/main.rs ]; then
-            sed -i 's/bsproxy/zxproxy/g' /root/ZXProxy/src/main.rs
-            sed -i 's/BSProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
-            sed -i 's/zkproxy/zxproxy/g' /root/ZXProxy/src/main.rs
-            sed -i 's/ZKProxy/ZXProxy/g' /root/ZXProxy/src/main.rs
-        fi
-        
-        # Atualizar referências em todos os arquivos .rs
-        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/bsproxy/zxproxy/g' {} \;
-        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/BSProxy/ZXProxy/g' {} \;
-        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/zkproxy/zxproxy/g' {} \;
-        find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/ZKProxy/ZXProxy/g' {} \;
-    fi
+    # Atualizar referências em todos os arquivos .rs
+    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/bsproxy/zxproxy/g' {} \; 2>/dev/null
+    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/BSProxy/ZXProxy/g' {} \; 2>/dev/null
+    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/zkproxy/zxproxy/g' {} \; 2>/dev/null
+    find /root/ZXProxy/src -name "*.rs" -exec sed -i 's/ZKProxy/ZXProxy/g' {} \; 2>/dev/null
     
     cd /root/ZXProxy || error_exit "Diretório do ZXProxy não encontrado"
     
     # Compilar
     echo "Compilando... (isso pode levar alguns minutos)"
+    cargo clean > /dev/null 2>&1
     cargo build --release --jobs "$(nproc)" > /tmp/zxproxy_build.log 2>&1
     
     # Verificar se a compilação foi bem sucedida
     if [ $? -ne 0 ]; then
         echo "❌ Erro na compilação. Log:"
-        tail -n 50 /tmp/zxproxy_build.log
-        error_exit "Falha ao compilar ZXProxy"
+        tail -n 30 /tmp/zxproxy_build.log
+        echo ""
+        echo "📝 Tentando compilar com menos jobs..."
+        cargo build --release > /tmp/zxproxy_build2.log 2>&1
+        if [ $? -ne 0 ]; then
+            echo "❌ Erro novamente. Log completo:"
+            cat /tmp/zxproxy_build2.log
+            error_exit "Falha ao compilar ZXProxy"
+        fi
     fi
     
-    # Procurar o binário (pode ser zxproxy, bsproxy ou zkproxy)
+    # Procurar o binário
     BINARY_FOUND=""
     if [ -f ./target/release/zxproxy ]; then
         BINARY_FOUND="./target/release/zxproxy"
@@ -145,7 +169,7 @@ else
     chmod +x /opt/zxproxy/proxy
     [ -f /opt/zxproxy/menu ] && chmod +x /opt/zxproxy/menu
 
-    # Criar o link usando cp (mais confiável)
+    # Criar o link usando cp
     if [ -f /opt/zxproxy/menu ]; then
         cp /opt/zxproxy/menu /usr/local/bin/zxproxy
     else
