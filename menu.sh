@@ -20,7 +20,7 @@ show_menu() {
         fi
     done
     if [ -n "$ACTIVE_PORTS" ]; then
-        echo "Porta(s) aberta(s):$ACTIVE_PORTS"
+        echo "Porta(s) aberta(s): $ACTIVE_PORTS"
     else
         echo "Porta(s): nenhuma"
     fi
@@ -64,6 +64,11 @@ open_port() {
 
 close_port() {
     read -p "Digite a porta: " PORT
+    if [[ -z "$PORT" ]]; then
+        echo "❌ Inválida!"
+        sleep 2
+        return
+    fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         PID=$(cat "${PID_FILE}${PORT}.pid")
         sudo kill -9 $PID 2>/dev/null
