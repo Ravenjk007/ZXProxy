@@ -28,8 +28,7 @@ show_menu() {
     echo " 1 - Abrir Porta"
     echo " 2 - Fechar Porta"
     echo " 3 - Status do Proxy"
-    echo " 4 - Ver Métricas (HTTP)"
-    echo " 5 - Sair"
+    echo " 4 - Sair"
     echo ""
     echo -n "--> Selecione uma opção: "
 }
@@ -52,7 +51,13 @@ open_port() {
         sleep 3
         return
     fi
-    nohup ${ZXPROXY} -p ${PORT} -m > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    
+    if [ "$PORT" -lt 1024 ]; then
+        nohup sudo ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    else
+        nohup ${ZXPROXY} -p ${PORT} > "/tmp/zxproxy_${PORT}.log" 2>&1 &
+    fi
+    
     echo $! > "${PID_FILE}${PORT}.pid"
     sleep 2
     if ps -p $(cat "${PID_FILE}${PORT}.pid") > /dev/null 2>&1; then
@@ -62,6 +67,7 @@ open_port() {
         echo "❌ Falha ao abrir porta ${PORT}!"
         rm -f "${PID_FILE}${PORT}.pid"
         echo "📝 Verifique o log: /tmp/zxproxy_${PORT}.log"
+        tail -n 10 "/tmp/zxproxy_${PORT}.log" 2>/dev/null
     fi
     sleep 2
 }
@@ -75,7 +81,7 @@ close_port() {
     fi
     if [[ -f "${PID_FILE}${PORT}.pid" ]]; then
         PID=$(cat "${PID_FILE}${PORT}.pid")
-        kill -9 $PID 2>/dev/null
+        sudo kill -9 $PID 2>/dev/null
         rm -f "${PID_FILE}${PORT}.pid"
         echo "✅ Porta ${PORT} fechada!"
     else
@@ -87,7 +93,6 @@ close_port() {
 show_status() {
     echo "📊 Status do ZXProxy:"
     echo "===================="
-    ACTIVE_PORTS=""
     for pidfile in ${PID_FILE}*.pid; do
         if [ -f "$pidfile" ]; then
             PORT=$(basename "$pidfile" .pid | sed 's/zxproxy_//')
@@ -95,25 +100,9 @@ show_status() {
             if ps -p $PID > /dev/null 2>&1; then
                 echo "✅ Porta $PORT: ativa (PID: $PID)"
                 echo "   Log: /tmp/zxproxy_${PORT}.log"
-                ACTIVE_PORTS="$ACTIVE_PORTS $PORT"
             fi
         fi
     done
-    if [ -z "$ACTIVE_PORTS" ]; then
-        echo "❌ Nenhuma porta ativa"
-    fi
-    echo ""
-    read -p "Pressione Enter para continuar..."
-}
-
-show_metrics() {
-    echo "📊 Métricas do ZXProxy:"
-    echo "======================"
-    if command -v curl &> /dev/null; then
-        curl -s http://localhost:9090/metrics 2>/dev/null | python3 -m json.tool 2>/dev/null || curl -s http://localhost:9090/metrics 2>/dev/null || echo "Servidor de métricas não está rodando"
-    else
-        echo "curl não instalado. Acesse: http://localhost:9090/metrics"
-    fi
     echo ""
     read -p "Pressione Enter para continuar..."
 }
@@ -125,8 +114,7 @@ while true; do
         1) open_port ;;
         2) close_port ;;
         3) show_status ;;
-        4) show_metrics ;;
-        5) echo "👋 Saindo..."; exit 0 ;;
+        4) echo "👋 Saindo..."; exit 0 ;;
         *) echo "❌ Opção inválida!"; sleep 2 ;;
     esac
 done
